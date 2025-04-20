@@ -274,7 +274,7 @@ namespace claudpro.Services
                 // Build waypoints
                 string origin = $"{vehicle.StartLatitude},{vehicle.StartLongitude}";
                 string destination = $"{destinationLat},{destinationLng}";
-                string waypointsStr = string.Join("|", vehicle.AssignedPassengers.Select(p => $"{p.Latitude},{p.Longitude}"));
+                string waypointsStr = "optimize:true|" + string.Join("|", vehicle.AssignedPassengers.Select(p => $"{p.Latitude},{p.Longitude}"));
 
                 string url = $"https://maps.googleapis.com/maps/api/directions/json?" +
                     $"origin={origin}" +
@@ -311,6 +311,8 @@ namespace claudpro.Services
 
                 var response = await httpClient.GetStringAsync(url);
                 dynamic data = JsonConvert.DeserializeObject(response);
+
+                Console.WriteLine(JsonConvert.SerializeObject(data, Formatting.Indented));
 
                 if (data.status.ToString() != "OK")
                 {
