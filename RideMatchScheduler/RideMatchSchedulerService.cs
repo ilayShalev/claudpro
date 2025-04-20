@@ -376,6 +376,8 @@ namespace RideMatchScheduler
             // Get the target time as DateTime for today (we'll use just the time portion)
             DateTime targetDateTime = DateTime.Today.Add(targetTime);
 
+            Log($"Calculating pickup times based on target arrival time: {targetDateTime.ToString("HH:mm:ss")}");
+
             foreach (var vehicle in solution.Vehicles)
             {
                 if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
@@ -385,9 +387,13 @@ namespace RideMatchScheduler
                 if (routingService.VehicleRouteDetails.ContainsKey(vehicle.Id))
                 {
                     routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
+                    Log($"Found Google route details for vehicle {vehicle.Id}: {routeDetails.TotalTime} minutes total trip time");
                 }
-                if (routeDetails == null)
+                else
+                {
+                    Log($"Warning: No route details found for vehicle {vehicle.Id}. Using estimates.");
                     continue;
+                }
 
                 // Get total trip time from start to destination in minutes
                 double totalTripTime = routeDetails.TotalTime;
@@ -397,9 +403,9 @@ namespace RideMatchScheduler
 
                 // Store the driver's departure time
                 vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
+                Log($"Vehicle {vehicle.Id} departure time: {vehicle.DepartureTime}");
 
                 // Now calculate each passenger's pickup time based on cumulative time from start
-                double cumulativeTimeFromStart = 0;
                 for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
                 {
                     var passenger = vehicle.AssignedPassengers[i];
@@ -408,11 +414,17 @@ namespace RideMatchScheduler
                     var stopDetail = routeDetails.StopDetails.FirstOrDefault(s => s.PassengerId == passenger.Id);
                     if (stopDetail != null)
                     {
-                        cumulativeTimeFromStart = stopDetail.CumulativeTime;
+                        double cumulativeTimeFromStart = stopDetail.CumulativeTime;
 
                         // Calculate pickup time based on driver start time plus cumulative time to this passenger
                         DateTime pickupTime = driverStartTime.AddMinutes(cumulativeTimeFromStart);
                         passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
+
+                        Log($"Passenger {passenger.Id} ({passenger.Name}) pickup time: {passenger.EstimatedPickupTime}");
+                    }
+                    else
+                    {
+                        Log($"Warning: No stop details found for passenger {passenger.Id} in vehicle {vehicle.Id}");
                     }
                 }
             }
