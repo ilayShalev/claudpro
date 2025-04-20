@@ -10,6 +10,7 @@ using claudpro.Models;
 using claudpro.Services;
 using claudpro.UI;
 
+
 namespace claudpro
 {
     public partial class DriverForm : Form
@@ -661,11 +662,12 @@ private async Task LoadDriverDataAsync()
 
             if (assignedPassengers != null && assignedPassengers.Count > 0)
             {
-                // Display departure time with bold formatting - this is key
+                // Display departure time with bold formatting - using centralized formatter
                 if (!string.IsNullOrEmpty(vehicle.DepartureTime))
                 {
+                    string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
                     routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                    routeDetailsTextBox.AppendText($"\nDeparture Time: {vehicle.DepartureTime}\n\n");
+                    routeDetailsTextBox.AppendText($"\nDeparture Time: {formattedDepartureTime}\n\n");
                     routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                 }
 
@@ -685,11 +687,12 @@ private async Task LoadDriverDataAsync()
                     else
                         routeDetailsTextBox.AppendText($"   Pick-up: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n");
 
-                    // Display pickup time with bold formatting - this is key
+                    // Display pickup time with bold formatting - using centralized formatter
                     if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                     {
+                        string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                         routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                        routeDetailsTextBox.AppendText($"   Pick-up Time: {passenger.EstimatedPickupTime}\n");
+                        routeDetailsTextBox.AppendText($"   Pick-up Time: {formattedPickupTime}\n");
                         routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                     }
                     else if (i == 0 && pickupTime.HasValue)

@@ -263,7 +263,8 @@ namespace claudpro.Services
         }
         /// Gets route details from the Google Directions API
         /// </summary>
-        // עדכון למתודה GetRouteDetailsAsync ב-MapService.cs
+        // Update the GetRouteDetailsAsync method in MapService.cs to properly handle time formats
+
         public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng, DateTime? targetArrivalTime = null)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
@@ -274,33 +275,32 @@ namespace claudpro.Services
                 // Build waypoints
                 string origin = $"{vehicle.StartLatitude},{vehicle.StartLongitude}";
                 string destination = $"{destinationLat},{destinationLng}";
-                string waypointsStr = "optimize:true|" + string.Join("|", vehicle.AssignedPassengers.Select(p => $"{p.Latitude},{p.Longitude}"));
+                string waypointsStr = string.Join("|", vehicle.AssignedPassengers.Select(p => $"{p.Latitude},{p.Longitude}"));
 
                 string url = $"https://maps.googleapis.com/maps/api/directions/json?" +
                     $"origin={origin}" +
                     $"&destination={destination}" +
                     (vehicle.AssignedPassengers.Any() ? $"&waypoints={waypointsStr}" : "");
 
-                // אם יש זמן הגעה מטרה, משתמשים בו במקום זמן יציאה
+                // If a target arrival time is provided, use it
                 if (targetArrivalTime.HasValue)
                 {
-                    // וידוא שהתאריך הוא עתידי - אם התאריך קטן מהיום, נשתמש במחר 
+                    // Always ensure the target time is in the future
                     DateTime futureArrivalTime = targetArrivalTime.Value;
+
                     if (futureArrivalTime <= DateTime.Now)
                     {
-                        // הערה: אנחנו משתמשים בתאריך של מחר עם השעה המקורית
-                        // שעות בפורמט 24 שעות נשמרות נכון
-                        futureArrivalTime = DateTime.Today.AddDays(1) + targetArrivalTime.Value.TimeOfDay;
+                        // If today's time has already passed, use tomorrow with the same time of day
+                        futureArrivalTime = DateTime.Today.AddDays(1).Add(targetArrivalTime.Value.TimeOfDay);
 
-                        // בדיקה אם אחרי התיקון עדיין לא בעתיד
+                        // Double-check it's still in the future
                         if (futureArrivalTime <= DateTime.Now)
                         {
-                            // אם עדיין בעבר, נוסיף עוד יום
                             futureArrivalTime = futureArrivalTime.AddDays(1);
                         }
                     }
 
-                    // המרת התאריך לפורמט Unix timestamp
+                    // Convert to Unix timestamp for Google API
                     var unixTimestamp = (long)((DateTimeOffset)futureArrivalTime).ToUnixTimeSeconds();
                     url += $"&arrival_time={unixTimestamp}";
 
@@ -311,8 +311,6 @@ namespace claudpro.Services
 
                 var response = await httpClient.GetStringAsync(url);
                 dynamic data = JsonConvert.DeserializeObject(response);
-
-                Console.WriteLine(JsonConvert.SerializeObject(data, Formatting.Indented));
 
                 if (data.status.ToString() != "OK")
                 {
@@ -353,19 +351,63 @@ namespace claudpro.Services
                         ? vehicle.AssignedPassengers[i].Id
                         : -1;
 
-                    // שמירת זמן ההגעה המשוער לכל נקודת עצירה (אם מסופק בתשובה)
+                    // Process arrival time from API response - ensure consistent 24-hour format
                     string estimatedArrivalTime = null;
                     if (leg.arrival_time != null)
                     {
-                        estimatedArrivalTime = leg.arrival_time.text.ToString();
+                        // First try to parse the time directly from text field
+                        if (!string.IsNullOrEmpty(leg.arrival_time.text.ToString()))
+                        {
+                            string apiTimeText = leg.arrival_time.text.ToString();
+                            if (DateTime.TryParse(apiTimeText, out DateTime parsedTime))
+                            {
+                                // Store in 24-hour format
+                                estimatedArrivalTime = parsedTime.ToString("HH:mm");
+                            }
+                        }
+
+                        // If text parsing failed, try using the value field which is sometimes a timestamp
+                        if (string.IsNullOrEmpty(estimatedArrivalTime) && leg.arrival_time.value != null)
+                        {
+                            try
+                            {
+                                long timestamp = Convert.ToInt64(leg.arrival_time.value.ToString());
+                                var dateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime.ToLocalTime();
+                                estimatedArrivalTime = dateTime.ToString("HH:mm");
+                            }
+                            catch { /* Ignore conversion errors */ }
+                        }
+
                         Console.WriteLine($"Stop {i + 1} arrival time from API: {estimatedArrivalTime}");
                     }
 
-                    // שמירת זמן היציאה המשוער מכל נקודת עצירה (אם מסופק בתשובה)
+                    // Process departure time similarly
                     string estimatedDepartureTime = null;
                     if (leg.departure_time != null)
                     {
-                        estimatedDepartureTime = leg.departure_time.text.ToString();
+                        // First try to parse the time directly from text field
+                        if (!string.IsNullOrEmpty(leg.departure_time.text.ToString()))
+                        {
+                            string apiTimeText = leg.departure_time.text.ToString();
+                            if (DateTime.TryParse(apiTimeText, out DateTime parsedTime))
+                            {
+                                // Store in 24-hour format
+                                estimatedDepartureTime = parsedTime.ToString("HH:mm");
+                            }
+                        }
+
+                        // If text parsing failed, try using the value field
+                        if (string.IsNullOrEmpty(estimatedDepartureTime) && leg.departure_time.value != null)
+                        {
+                            try
+                            {
+                                long timestamp = Convert.ToInt64(leg.departure_time.value.ToString());
+                                var dateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime.ToLocalTime();
+                                estimatedDepartureTime = dateTime.ToString("HH:mm");
+                            }
+                            catch { /* Ignore conversion errors */ }
+                        }
+
                         Console.WriteLine($"Stop {i + 1} departure time from API: {estimatedDepartureTime}");
                     }
 
@@ -383,13 +425,40 @@ namespace claudpro.Services
                     });
                 }
 
-                // שומרים את זמן היציאה הראשוני אם יש
+                // Save initial departure time from API response
                 if (data.routes[0].legs.Count > 0 && data.routes[0].legs[0].departure_time != null)
                 {
-                    string departureTime = data.routes[0].legs[0].departure_time.text.ToString();
-                    vehicle.DepartureTime = departureTime;
-                    routeDetail.DepartureTime = departureTime;
-                    Console.WriteLine($"Vehicle departure time from API: {departureTime}");
+                    string departureTimeText = null;
+
+                    // First try to parse from text field
+                    if (!string.IsNullOrEmpty(data.routes[0].legs[0].departure_time.text.ToString()))
+                    {
+                        string apiTimeText = data.routes[0].legs[0].departure_time.text.ToString();
+                        if (DateTime.TryParse(apiTimeText, out DateTime parsedTime))
+                        {
+                            // Store in 24-hour format
+                            departureTimeText = parsedTime.ToString("HH:mm");
+                        }
+                    }
+
+                    // If text parsing failed, try using the value field
+                    if (string.IsNullOrEmpty(departureTimeText) && data.routes[0].legs[0].departure_time.value != null)
+                    {
+                        try
+                        {
+                            long timestamp = Convert.ToInt64(data.routes[0].legs[0].departure_time.value.ToString());
+                            var dateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime.ToLocalTime();
+                            departureTimeText = dateTime.ToString("HH:mm");
+                        }
+                        catch { /* Ignore conversion errors */ }
+                    }
+
+                    if (!string.IsNullOrEmpty(departureTimeText))
+                    {
+                        vehicle.DepartureTime = departureTimeText;
+                        routeDetail.DepartureTime = departureTimeText;
+                        Console.WriteLine($"Vehicle departure time from API (24-hour format): {departureTimeText}");
+                    }
                 }
 
                 routeDetail.TotalDistance = totalDistance;
@@ -402,8 +471,7 @@ namespace claudpro.Services
                 Console.WriteLine($"Error getting route details: {ex.Message}");
                 throw;
             }
-        }                 /// Estimates route details using straight-line distances when Google API is not available
-                          /// </summary>
+        }                          /// </summary>
         public RouteDetails EstimateRouteDetails(Vehicle vehicle, double destinationLat, double destinationLng)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)

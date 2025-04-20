@@ -149,6 +149,7 @@
     </Compile>
     <Compile Include="UI\ControlExtensions.cs" />
     <Compile Include="UI\MapOverlays.cs" />
+    <Compile Include="Services\RepeatsFunctions.cs" />
     <Compile Include="UI\UserEditForm.cs">
       <SubType>Form</SubType>
     </Compile>

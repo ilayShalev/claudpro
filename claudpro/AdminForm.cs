@@ -1552,11 +1552,12 @@ namespace claudpro
             routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
             routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
 
-            // Add departure time if available
+            // Add departure time if available - using centralized formatter
             if (!string.IsNullOrEmpty(vehicle.DepartureTime))
             {
+                string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
                 routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                routeDetailsTextBox.AppendText($"Departure Time: {vehicle.DepartureTime}\n");
+                routeDetailsTextBox.AppendText($"Departure Time: {formattedDepartureTime}\n");
                 routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
             }
 
@@ -1581,11 +1582,12 @@ namespace claudpro
                     : $"({passenger.Latitude:F4}, {passenger.Longitude:F4})";
                 routeDetailsTextBox.AppendText($"   Pickup at: {location}\n");
 
-                // Display estimated pickup time if available
+                // Display estimated pickup time using centralized formatter
                 if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                 {
+                    string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                     routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                    routeDetailsTextBox.AppendText($"   Estimated pickup time: {passenger.EstimatedPickupTime}\n");
+                    routeDetailsTextBox.AppendText($"   Estimated pickup time: {formattedPickupTime}\n");
                     routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                 }
 
@@ -1619,10 +1621,12 @@ namespace claudpro
                 routeDetailsTextBox.AppendText($"Total Distance: {detail.TotalDistance:F2} km\n");
                 routeDetailsTextBox.AppendText($"Total Time: {detail.TotalTime:F2} min\n");
 
+                // Display departure time using the centralized formatter
                 if (!string.IsNullOrEmpty(vehicle?.DepartureTime))
                 {
+                    string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
                     routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                    routeDetailsTextBox.AppendText($"Departure Time: {vehicle.DepartureTime}\n");
+                    routeDetailsTextBox.AppendText($"Departure Time: {formattedDepartureTime}\n");
                     routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                 }
 
@@ -1649,11 +1653,12 @@ namespace claudpro
                         routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                         routeDetailsTextBox.AppendText($"   Location: {stopLocation}\n");
 
-                        // Display estimated pickup time if available
+                        // Display estimated pickup time using the centralized formatter
                         if (passenger != null && !string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                         {
+                            string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                            routeDetailsTextBox.AppendText($"   Pickup Time: {passenger.EstimatedPickupTime}\n");
+                            routeDetailsTextBox.AppendText($"   Pickup Time: {formattedPickupTime}\n");
                             routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                         }
                     }
@@ -1690,7 +1695,6 @@ namespace claudpro
                 routeDetailsTextBox.AppendText("--------------------------------\n\n");
             }
         }
-
         #endregion
 
         #region Helper Methods

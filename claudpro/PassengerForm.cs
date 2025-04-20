@@ -393,11 +393,12 @@ namespace claudpro
                     if (!string.IsNullOrEmpty(assignedVehicle.LicensePlate))
                         assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n");
 
-                    // Show pickup time from passenger object first (this comes from algorithm calculation)
+                    // Show pickup time with proper formatting using the centralized formatter
                     if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                     {
+                        string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                         assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                        assignmentDetailsTextBox.AppendText($"Pickup Time: {passenger.EstimatedPickupTime}\n");
+                        assignmentDetailsTextBox.AppendText($"Pickup Time: {formattedPickupTime}\n");
                         assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
                     }
                     // Fall back to pickupTime from database if EstimatedPickupTime is not set
@@ -432,7 +433,6 @@ namespace claudpro
                 assignmentDetailsTextBox.AppendText($"Error displaying information: {ex.Message}");
             }
         }
-
         // Updated LoadPassengerDataAsync to get the complete passenger details with EstimatedPickupTime
         private async Task LoadPassengerDataAsync()
         {

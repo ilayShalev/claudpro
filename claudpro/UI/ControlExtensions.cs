@@ -170,5 +170,7 @@ namespace claudpro.UI
             textBox.AppendText($"{DateTime.Now:HH:mm:ss} - {message}{Environment.NewLine}");
             textBox.ScrollToCaret();
         }
+
+
     }
 }

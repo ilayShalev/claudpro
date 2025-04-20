@@ -377,6 +377,8 @@ namespace RideMatchScheduler
             }
         }
         // New method to calculate pickup times based on desired arrival time at destination
+        // Update the CalculatePickupTimesBasedOnTargetArrival method in RideMatchSchedulerService.cs
+
         private async Task CalculatePickupTimesBasedOnTargetArrival(Solution solution, string targetTimeString, RoutingService routingService)
         {
             // Parse target arrival time
@@ -388,10 +390,9 @@ namespace RideMatchScheduler
             // Get the target time as DateTime for tomorrow (users are scheduling rides for tomorrow)
             DateTime targetDateTime = DateTime.Today.AddDays(1).Add(targetTime);
 
-            // וידוא שזמן היעד הוא באמת עתידי
+            // Ensure targetDateTime is in the future
             if (targetDateTime <= DateTime.Now)
             {
-                // אם הזמן לא בעתיד, נוסיף עוד יום
                 targetDateTime = targetDateTime.AddDays(1);
             }
 
@@ -402,9 +403,7 @@ namespace RideMatchScheduler
                 // Call the Google Routes API with arrival_time parameter
                 await routingService.GetGoogleRoutesAsync(null, solution, targetDateTime);
 
-                // הנתונים כבר עודכנו בכלי הרכב והנוסעים בתוך GetGoogleRoutesAsync
-                // נעדכן את התצוגה במקרה שיש מידע חסר
-
+                // Process data after Google API call
                 foreach (var vehicle in solution.Vehicles)
                 {
                     if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
@@ -416,68 +415,66 @@ namespace RideMatchScheduler
                         routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
                         Log($"Found Google route details for vehicle {vehicle.Id}: {routeDetails.TotalTime} minutes total trip time");
 
-                        // השתמש בזמן היציאה שהתקבל מגוגל או חשב לפי זמן הגעה
+                        // Use departure time from Google API or calculate based on arrival time
                         if (!string.IsNullOrEmpty(routeDetails.DepartureTime))
                         {
-                            vehicle.DepartureTime = routeDetails.DepartureTime;
-                            Log($"Vehicle {vehicle.Id} departure time from Google API: {vehicle.DepartureTime}");
+                            // Ensure departure time is properly formatted in 24-hour time
+                            if (DateTime.TryParse(routeDetails.DepartureTime, out DateTime parsedDepartureTime))
+                            {
+                                // Store in 24-hour format
+                                vehicle.DepartureTime = parsedDepartureTime.ToString("HH:mm");
+                                Log($"Vehicle {vehicle.Id} departure time from Google API (24-hour format): {vehicle.DepartureTime}");
+                            }
+                            else
+                            {
+                                Log($"Failed to parse departure time: {routeDetails.DepartureTime}");
+                                // Calculate as fallback
+                                CalculateDepartureTime(vehicle, routeDetails, targetDateTime);
+                            }
                         }
                         else if (!string.IsNullOrEmpty(vehicle.DepartureTime))
                         {
                             Log($"Vehicle {vehicle.Id} already has departure time: {vehicle.DepartureTime}");
+                            // Ensure it's in 24-hour format
+                            if (DateTime.TryParse(vehicle.DepartureTime, out DateTime existingTime))
+                            {
+                                vehicle.DepartureTime = existingTime.ToString("HH:mm");
+                            }
                         }
                         else
                         {
-                            // חישוב ידני של זמן היציאה אם לא התקבל מה-API
-                            double totalTripTime = routeDetails.TotalTime;
-                            DateTime driverStartTime = targetDateTime.AddMinutes(-totalTripTime);
-                            vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
-                            Log($"Vehicle {vehicle.Id} calculated departure time: {vehicle.DepartureTime}");
+                            // Manual calculation of departure time
+                            CalculateDepartureTime(vehicle, routeDetails, targetDateTime);
                         }
 
-                        // עדכון זמני איסוף לנוסעים
+                        // Update pickup times for passengers
                         for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
                         {
                             var passenger = vehicle.AssignedPassengers[i];
 
-                            // מצא את הפרטים המתאימים לנוסע בתוצאות המסלול
+                            // Find matching stop details
                             var stopDetail = routeDetails.StopDetails.FirstOrDefault(s => s.PassengerId == passenger.Id);
                             if (stopDetail != null)
                             {
-                                // אם יש זמן הגעה מדויק מהAPI, השתמש בו
+                                // If API provided an arrival time, use it
                                 if (!string.IsNullOrEmpty(stopDetail.EstimatedArrivalTime))
                                 {
-                                    passenger.EstimatedPickupTime = stopDetail.EstimatedArrivalTime;
-                                    Log($"Passenger {passenger.Id} ({passenger.Name}) pickup time from Google API: {passenger.EstimatedPickupTime}");
-                                }
-                                // אחרת חשב זמן הגעה לפי זמן נסיעה מצטבר
-                                else if (string.IsNullOrEmpty(passenger.EstimatedPickupTime))
-                                {
-                                    double cumulativeTimeFromStart = stopDetail.CumulativeTime;
-
-                                    // אם אין זמן יציאה לרכב, חשב לפי זמן הגעה רצוי
-                                    DateTime pickupTime;
-                                    if (!string.IsNullOrEmpty(vehicle.DepartureTime) && DateTime.TryParse(vehicle.DepartureTime, out DateTime departureTime))
+                                    // Convert to 24-hour format for consistency
+                                    if (DateTime.TryParse(stopDetail.EstimatedArrivalTime, out DateTime parsedTime))
                                     {
-                                        // חבר את השעה לתאריך של מחר
-                                        DateTime fullDepartureTime = DateTime.Today.AddDays(1).Date + departureTime.TimeOfDay;
-
-                                        // וידוא שזמן היציאה הוא בעתיד
-                                        if (fullDepartureTime <= DateTime.Now)
-                                        {
-                                            fullDepartureTime = fullDepartureTime.AddDays(1);
-                                        }
-
-                                        pickupTime = fullDepartureTime.AddMinutes(cumulativeTimeFromStart);
+                                        passenger.EstimatedPickupTime = parsedTime.ToString("HH:mm");
+                                        Log($"Passenger {passenger.Id} ({passenger.Name}) pickup time from Google API (24-hour format): {passenger.EstimatedPickupTime}");
                                     }
                                     else
                                     {
-                                        // חשב לאחור מזמן הגעה רצוי
-                                        pickupTime = targetDateTime.AddMinutes(-(routeDetails.TotalTime - cumulativeTimeFromStart));
+                                        Log($"Failed to parse pickup time: {stopDetail.EstimatedArrivalTime}");
+                                        CalculatePassengerPickupTime(vehicle, passenger, stopDetail, targetDateTime, routeDetails);
                                     }
-
-                                    passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
-                                    Log($"Passenger {passenger.Id} ({passenger.Name}) calculated pickup time: {passenger.EstimatedPickupTime}");
+                                }
+                                // Calculate from departure time or target arrival
+                                else if (string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+                                {
+                                    CalculatePassengerPickupTime(vehicle, passenger, stopDetail, targetDateTime, routeDetails);
                                 }
                             }
                             else
@@ -489,6 +486,7 @@ namespace RideMatchScheduler
                     else
                     {
                         Log($"Warning: No route details found for vehicle {vehicle.Id}. Using estimates.");
+                        // Fall back to estimated calculations here if needed
                     }
                 }
             }
@@ -497,57 +495,105 @@ namespace RideMatchScheduler
                 Log($"Error when getting route details with arrival time: {ex.Message}");
                 Log($"Falling back to estimated calculations");
 
-                // המשך עם הלוגיקה המקורית לחישוב זמנים במקרה של כישלון
-                foreach (var vehicle in solution.Vehicles)
-                {
-                    if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
-                        continue;
+                // Continue with original fallback logic for time calculation
+                FallbackTimeCalculation(solution, targetDateTime);
+            }
+        }
 
-                    RouteDetails routeDetails = null;
-                    if (routingService.VehicleRouteDetails.ContainsKey(vehicle.Id))
+        // Helper method to calculate departure time consistently
+        private void CalculateDepartureTime(Vehicle vehicle, RouteDetails routeDetails, DateTime targetDateTime)
+        {
+            double totalTripTime = routeDetails.TotalTime;
+            DateTime driverStartTime = targetDateTime.AddMinutes(-totalTripTime);
+
+            // Store in 24-hour format
+            vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
+            Log($"Vehicle {vehicle.Id} calculated departure time (24-hour format): {vehicle.DepartureTime}");
+        }
+
+        // Helper method to calculate passenger pickup time consistently
+        private void CalculatePassengerPickupTime(Vehicle vehicle, Passenger passenger, StopDetail stopDetail, DateTime targetDateTime, RouteDetails routeDetails)
+        {
+            double cumulativeTimeFromStart = stopDetail.CumulativeTime;
+            DateTime pickupTime;
+
+            // Calculate based on vehicle departure time if available
+            if (!string.IsNullOrEmpty(vehicle.DepartureTime) && DateTime.TryParse(vehicle.DepartureTime, out DateTime departureTime))
+            {
+                // Combine with tomorrow's date
+                DateTime fullDepartureTime = DateTime.Today.AddDays(1).Date + departureTime.TimeOfDay;
+
+                // Ensure it's in the future
+                if (fullDepartureTime <= DateTime.Now)
+                {
+                    fullDepartureTime = fullDepartureTime.AddDays(1);
+                }
+
+                pickupTime = fullDepartureTime.AddMinutes(cumulativeTimeFromStart);
+            }
+            else
+            {
+                // Calculate backward from target arrival time
+                pickupTime = targetDateTime.AddMinutes(-(routeDetails.TotalTime - cumulativeTimeFromStart));
+            }
+
+            // Store in 24-hour format
+            passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
+            Log($"Passenger {passenger.Id} ({passenger.Name}) calculated pickup time (24-hour format): {passenger.EstimatedPickupTime}");
+        }
+
+        // Fallback calculation method for when Google API fails
+        private void FallbackTimeCalculation(Solution solution, DateTime targetDateTime)
+        {
+            foreach (var vehicle in solution.Vehicles)
+            {
+                if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                    continue;
+
+                RouteDetails routeDetails = null;
+                if (routingService.VehicleRouteDetails.ContainsKey(vehicle.Id))
+                {
+                    routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
+                    Log($"Using estimated route details for vehicle {vehicle.Id}: {routeDetails.TotalTime} minutes total trip time");
+                }
+                else
+                {
+                    Log($"Warning: No route details found for vehicle {vehicle.Id}. Cannot calculate times.");
+                    continue;
+                }
+
+                // Get total trip time from start to destination in minutes
+                double totalTripTime = routeDetails.TotalTime;
+
+                // Calculate when driver needs to start to arrive at destination at target time
+                DateTime driverStartTime = targetDateTime.AddMinutes(-totalTripTime);
+
+                // Store the driver's departure time using 24-hour format
+                vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
+                Log($"Vehicle {vehicle.Id} estimated departure time (24-hour format): {vehicle.DepartureTime}");
+
+                // Calculate each passenger's pickup time based on cumulative time from start
+                for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
+                {
+                    var passenger = vehicle.AssignedPassengers[i];
+
+                    // Find corresponding stop detail
+                    var stopDetail = routeDetails.StopDetails.FirstOrDefault(s => s.PassengerId == passenger.Id);
+                    if (stopDetail != null)
                     {
-                        routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
-                        Log($"Using estimated route details for vehicle {vehicle.Id}: {routeDetails.TotalTime} minutes total trip time");
+                        double cumulativeTimeFromStart = stopDetail.CumulativeTime;
+
+                        // Calculate pickup time based on driver start time plus cumulative time to this passenger
+                        DateTime pickupTime = driverStartTime.AddMinutes(cumulativeTimeFromStart);
+
+                        // Use 24-hour format for consistent time representation
+                        passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
+
+                        Log($"Passenger {passenger.Id} ({passenger.Name}) estimated pickup time (24-hour format): {passenger.EstimatedPickupTime}");
                     }
                     else
                     {
-                        Log($"Warning: No route details found for vehicle {vehicle.Id}. Cannot calculate times.");
-                        continue;
-                    }
-
-                    // Get total trip time from start to destination in minutes
-                    double totalTripTime = routeDetails.TotalTime;
-
-                    // Calculate when driver needs to start to arrive at destination at target time
-                    DateTime driverStartTime = targetDateTime.AddMinutes(-totalTripTime);
-
-                    // Store the driver's departure time using 24-hour format
-                    vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
-                    Log($"Vehicle {vehicle.Id} estimated departure time: {vehicle.DepartureTime}");
-
-                    // Now calculate each passenger's pickup time based on cumulative time from start
-                    for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
-                    {
-                        var passenger = vehicle.AssignedPassengers[i];
-
-                        // Find corresponding stop detail
-                        var stopDetail = routeDetails.StopDetails.FirstOrDefault(s => s.PassengerId == passenger.Id);
-                        if (stopDetail != null)
-                        {
-                            double cumulativeTimeFromStart = stopDetail.CumulativeTime;
-
-                            // Calculate pickup time based on driver start time plus cumulative time to this passenger
-                            DateTime pickupTime = driverStartTime.AddMinutes(cumulativeTimeFromStart);
-
-                            // Use 24-hour format for consistent time representation
-                            passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
-
-                            Log($"Passenger {passenger.Id} ({passenger.Name}) estimated pickup time: {passenger.EstimatedPickupTime}");
-                        }
-                        else
-                        {
-                            Log($"Warning: No stop details found for passenger {passenger.Id} in vehicle {vehicle.Id}");
-                        }
+                        Log($"Warning: No stop details found for passenger {passenger.Id} in vehicle {vehicle.Id}");
                     }
                 }
             }
