@@ -614,13 +614,16 @@ namespace claudpro
                     var tempRoutingService = new RoutingService(mapService, destination.Latitude, destination.Longitude,destinationTargetTime);
 
 
-                    TimeSpan targetTime;
-                    if (TimeSpan.TryParse(destinationTargetTime, out TimeSpan))
+                    if (TimeSpan.TryParse(destinationTargetTime, out TimeSpan targetTime))
                     {
-                        targetDateTime = DateTime.Today.AddDays(1).Add(targetTime); // למשל: מחר בשעה 08:00
+                        DateTime targetDateTime = DateTime.Today.AddDays(1).Add(targetTime);
+                        await tempRoutingService.GetGoogleRoutesAsync(gMapControl, currentSolution, targetDateTime);
                     }
-                    await tempRoutingService.GetGoogleRoutesAsync(gMapControl, currentSolution, targetDateTime);
-
+                    else
+                    {
+                        // Fallback if time parsing fails
+                        await tempRoutingService.GetGoogleRoutesAsync(gMapControl, currentSolution, null);
+                    }
                     // Update the UI
                     UpdateRouteDetailsDisplay();
 
@@ -789,7 +792,7 @@ namespace claudpro
                             destinationTargetTime = timeTextBox.Text;
 
                             // Reinitialize routing service with new destination
-                            routingService = new RoutingService(mapService, destinationLat, destinationLng);
+                            routingService = new RoutingService(mapService, destinationLat, destinationLng, destinationTargetTime);
                         }
                         else
                         {

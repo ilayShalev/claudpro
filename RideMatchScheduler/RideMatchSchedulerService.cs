@@ -57,14 +57,14 @@ namespace RideMatchScheduler
                 {
                     // Initialize routing service with default destination
                     var defaultDest = dbService.GetDestinationAsync().GetAwaiter().GetResult();
-                    routingService = new RoutingService(mapService, defaultDest.Latitude, defaultDest.Longitude);
+                    routingService = new RoutingService(mapService, defaultDest.Latitude, defaultDest.Longitude, defaultDest.TargetTime);
                     Log($"Routing service initialized with destination: {defaultDest.Name}");
                 }
                 catch (Exception ex)
                 {
                     Log($"Failed to initialize routing service: {ex.Message}");
                     // Initialize with default values just to avoid null references
-                    routingService = new RoutingService(mapService, 0, 0);
+                    routingService = new RoutingService(mapService, 0, 0, "08:00:00"); // Use a default time as fallback
                 }
             }
             catch (Exception ex)
@@ -244,8 +244,7 @@ namespace RideMatchScheduler
                     Log($"Running algorithm with {passengers.Count} passengers and {vehicles.Count} vehicles");
 
                     // Create a routing service
-                    var routingService = new RoutingService(mapService, destination.Latitude, destination.Longitude);
-
+                    var routingService = new RoutingService(mapService, destination.Latitude, destination.Longitude, destination.TargetTime);
                     // Create the solver
                     var solver = new RideSharingGenetic(
                         passengers,
