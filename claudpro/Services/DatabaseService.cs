@@ -1286,9 +1286,9 @@ namespace claudpro.Services
                     using (var cmd = new SQLiteCommand(connection))
                     {
                         cmd.CommandText = @"
-                            INSERT INTO Routes (SolutionDate)
-                            VALUES (@SolutionDate);
-                            SELECT last_insert_rowid();";
+                    INSERT INTO Routes (SolutionDate)
+                    VALUES (@SolutionDate);
+                    SELECT last_insert_rowid();";
                         cmd.Parameters.AddWithValue("@SolutionDate", date);
                         cmd.Transaction = transaction;
 
@@ -1308,18 +1308,32 @@ namespace claudpro.Services
 
                         int routeDetailId;
 
+                        // Ensure DepartureTime is properly formatted in 24-hour format
+                        string formattedDepartureTime = null;
+                        if (!string.IsNullOrEmpty(vehicle.DepartureTime))
+                        {
+                            if (DateTime.TryParse(vehicle.DepartureTime, out DateTime dt))
+                            {
+                                formattedDepartureTime = dt.ToString("HH:mm");
+                            }
+                            else
+                            {
+                                formattedDepartureTime = vehicle.DepartureTime;
+                            }
+                        }
+
                         // Insert route detail including departure time
                         using (var cmd = new SQLiteCommand(connection))
                         {
                             cmd.CommandText = @"
-                                INSERT INTO RouteDetails (RouteID, VehicleID, TotalDistance, TotalTime, DepartureTime)
-                                VALUES (@RouteID, @VehicleID, @TotalDistance, @TotalTime, @DepartureTime);
-                                SELECT last_insert_rowid();";
+                        INSERT INTO RouteDetails (RouteID, VehicleID, TotalDistance, TotalTime, DepartureTime)
+                        VALUES (@RouteID, @VehicleID, @TotalDistance, @TotalTime, @DepartureTime);
+                        SELECT last_insert_rowid();";
                             cmd.Parameters.AddWithValue("@RouteID", routeId);
                             cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
                             cmd.Parameters.AddWithValue("@TotalDistance", vehicle.TotalDistance);
                             cmd.Parameters.AddWithValue("@TotalTime", vehicle.TotalTime);
-                            cmd.Parameters.AddWithValue("@DepartureTime", vehicle.DepartureTime ?? (object)DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DepartureTime", formattedDepartureTime ?? (object)DBNull.Value);
                             cmd.Transaction = transaction;
 
                             object result = await cmd.ExecuteScalarAsync();
@@ -1334,47 +1348,58 @@ namespace claudpro.Services
                         using (var cmd = new SQLiteCommand(connection))
                         {
                             cmd.CommandText = @"
-                                UPDATE Vehicles 
-                                SET DepartureTime = @DepartureTime
-                                WHERE VehicleID = @VehicleID";
+                        UPDATE Vehicles 
+                        SET DepartureTime = @DepartureTime
+                        WHERE VehicleID = @VehicleID";
                             cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
-                            cmd.Parameters.AddWithValue("@DepartureTime", vehicle.DepartureTime ?? (object)DBNull.Value);
+                            cmd.Parameters.AddWithValue("@DepartureTime", formattedDepartureTime ?? (object)DBNull.Value);
                             cmd.Transaction = transaction;
                             await cmd.ExecuteNonQueryAsync();
                         }
 
-                        // Save passenger assignments with estimated pickup times
+                        // Save passenger assignments with consistent time formatting
                         for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
                         {
                             var passenger = vehicle.AssignedPassengers[i];
+                            string formattedPickupTime = null;
+
+                            if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+                            {
+                                if (DateTime.TryParse(passenger.EstimatedPickupTime, out DateTime pt))
+                                {
+                                    formattedPickupTime = pt.ToString("HH:mm");
+                                }
+                                else
+                                {
+                                    formattedPickupTime = passenger.EstimatedPickupTime;
+                                }
+                            }
 
                             using (var cmd = new SQLiteCommand(connection))
                             {
                                 cmd.CommandText = @"
-                                    INSERT INTO PassengerAssignments (RouteDetailID, PassengerID, StopOrder, EstimatedPickupTime)
-                                    VALUES (@RouteDetailID, @PassengerID, @StopOrder, @EstimatedPickupTime)";
+                            INSERT INTO PassengerAssignments (RouteDetailID, PassengerID, StopOrder, EstimatedPickupTime)
+                            VALUES (@RouteDetailID, @PassengerID, @StopOrder, @EstimatedPickupTime)";
                                 cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
                                 cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
                                 cmd.Parameters.AddWithValue("@StopOrder", i + 1);
                                 cmd.Parameters.AddWithValue("@EstimatedPickupTime",
-                                    !string.IsNullOrEmpty(passenger.EstimatedPickupTime) ?
-                                    passenger.EstimatedPickupTime : (object)DBNull.Value);
+                                    formattedPickupTime ?? (object)DBNull.Value);
                                 cmd.Transaction = transaction;
 
                                 await cmd.ExecuteNonQueryAsync();
                             }
 
-                            // Also update passenger with estimated pickup time
+                            // Also update passenger with consistent time format
                             using (var cmd = new SQLiteCommand(connection))
                             {
                                 cmd.CommandText = @"
-                                    UPDATE Passengers 
-                                    SET EstimatedPickupTime = @EstimatedPickupTime
-                                    WHERE PassengerID = @PassengerID";
+                            UPDATE Passengers 
+                            SET EstimatedPickupTime = @EstimatedPickupTime
+                            WHERE PassengerID = @PassengerID";
                                 cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
                                 cmd.Parameters.AddWithValue("@EstimatedPickupTime",
-                                    !string.IsNullOrEmpty(passenger.EstimatedPickupTime) ?
-                                    passenger.EstimatedPickupTime : (object)DBNull.Value);
+                                    formattedPickupTime ?? (object)DBNull.Value);
                                 cmd.Transaction = transaction;
                                 await cmd.ExecuteNonQueryAsync();
                             }
@@ -1392,10 +1417,6 @@ namespace claudpro.Services
                 }
             }
         }
-
-        /// <summary>
-        /// Gets driver's route and assigned passengers for a specific date
-        /// </summary>
         /// <summary>
         /// Gets driver's route and assigned passengers for a specific date
         /// </summary>
@@ -1442,11 +1463,36 @@ namespace claudpro.Services
                         vehicle.TotalDistance = reader.GetDouble(1);
                         vehicle.TotalTime = reader.GetDouble(2);
                         departureTime = reader.IsDBNull(3) ? null : reader.GetString(3);
+
+                        // Be sure to set the departure time on the vehicle object
                         vehicle.DepartureTime = departureTime;
+
+                        // Log for debugging
+                        Console.WriteLine($"Retrieved departure time from RouteDetails: {departureTime ?? "null"}");
                     }
                     else
                     {
                         return (vehicle, new List<Passenger>(), null);
+                    }
+                }
+            }
+
+            // As a backup, check the Vehicles table if we didn't get a departure time
+            if (string.IsNullOrEmpty(departureTime))
+            {
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = "SELECT DepartureTime FROM Vehicles WHERE VehicleID = @VehicleID";
+                    cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
+
+                    object result = await cmd.ExecuteScalarAsync();
+                    if (result != null && !Convert.IsDBNull(result))
+                    {
+                        departureTime = result.ToString();
+                        vehicle.DepartureTime = departureTime;
+
+                        // Log for debugging
+                        Console.WriteLine($"Retrieved departure time from Vehicles table: {departureTime}");
                     }
                 }
             }
@@ -1484,11 +1530,32 @@ namespace claudpro.Services
 
                         passengers.Add(passenger);
 
+                        // Store the first passenger's pickup time
                         if (passengers.Count == 1 && !string.IsNullOrEmpty(pickupTime))
                         {
                             try
                             {
                                 firstPickupTime = DateTime.Parse(pickupTime);
+
+                                // If we still have no departure time, estimate it from first pickup
+                                if (string.IsNullOrEmpty(vehicle.DepartureTime))
+                                {
+                                    // Estimate departure as 10 minutes before first pickup
+                                    DateTime estimatedDeparture = firstPickupTime.Value.AddMinutes(-10);
+                                    departureTime = estimatedDeparture.ToString("HH:mm");
+                                    vehicle.DepartureTime = departureTime;
+
+                                    // Save this estimated departure time
+                                    using (var updateCmd = new SQLiteCommand(connection))
+                                    {
+                                        updateCmd.CommandText = "UPDATE Vehicles SET DepartureTime = @DepartureTime WHERE VehicleID = @VehicleID";
+                                        updateCmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
+                                        updateCmd.Parameters.AddWithValue("@DepartureTime", departureTime);
+                                        await updateCmd.ExecuteNonQueryAsync();
+
+                                        Console.WriteLine($"Updated vehicle with estimated departure time: {departureTime}");
+                                    }
+                                }
                             }
                             catch
                             {
@@ -1499,48 +1566,11 @@ namespace claudpro.Services
                 }
             }
 
-            // If no first pickup time was found and we have a departure time, estimate a pickup time
-            if (firstPickupTime == null && !string.IsNullOrEmpty(departureTime) && passengers.Count > 0)
-            {
-                try
-                {
-                    DateTime departure = DateTime.Parse(departureTime);
-                    firstPickupTime = departure.AddMinutes(15); // Estimate 15 min to first passenger
-
-                    // Update the first passenger's estimated pickup time if it's not already set
-                    if (string.IsNullOrEmpty(passengers[0].EstimatedPickupTime))
-                    {
-                        passengers[0].EstimatedPickupTime = firstPickupTime.Value.ToString("HH:mm");
-                    }
-                }
-                catch
-                {
-                    // If parsing fails, leave as null
-                }
-            }
-
-            // Check if we need to get departure time from the Vehicles table as a fallback
-            if (string.IsNullOrEmpty(vehicle.DepartureTime))
-            {
-                using (var cmd = new SQLiteCommand(connection))
-                {
-                    cmd.CommandText = "SELECT DepartureTime FROM Vehicles WHERE VehicleID = @VehicleID";
-                    cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
-
-                    var result = await cmd.ExecuteScalarAsync();
-                    if (result != null && !Convert.IsDBNull(result))
-                    {
-                        vehicle.DepartureTime = result.ToString();
-                    }
-                }
-            }
-
             vehicle.AssignedPassengers = passengers;
             return (vehicle, passengers, firstPickupTime);
-        }
-        /// <summary>
-        /// Gets the solution for a specific date
-        /// </summary>
+        }        /// <summary>
+                 /// Gets the solution for a specific date
+                 /// </summary>
         public async Task<Solution> GetSolutionForDateAsync(string date)
         {
             var solution = new Solution { Vehicles = new List<Vehicle>() };

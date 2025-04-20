@@ -1524,6 +1524,32 @@ namespace claudpro
 
             routeDetailsTextBox.AppendText($"Driver: {vehicle.DriverName ?? $"Driver {vehicleId}"}\n");
             routeDetailsTextBox.AppendText($"Vehicle Capacity: {vehicle.Capacity}\n");
+
+            // Ensure distance values match list view
+            if (routingService != null && routingService.VehicleRouteDetails.ContainsKey(vehicle.Id))
+            {
+                var routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
+                routeDetailsTextBox.AppendText($"Total Distance: {routeDetails.TotalDistance:F2} km\n");
+                routeDetailsTextBox.AppendText($"Total Time: {routeDetails.TotalTime:F2} minutes\n");
+
+                // Update vehicle object to match routing service data
+                vehicle.TotalDistance = routeDetails.TotalDistance;
+                vehicle.TotalTime = routeDetails.TotalTime;
+            }
+            else
+            {
+                routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
+                routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
+            }
+
+            // Format and display departure time
+            if (!string.IsNullOrEmpty(vehicle.DepartureTime))
+            {
+                string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText($"Departure Time: {formattedDepartureTime}\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+            }
             routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
             routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
 

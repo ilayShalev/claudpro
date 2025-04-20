@@ -370,7 +370,7 @@ namespace claudpro
                     assignmentDetailsTextBox.AppendText($"Pickup Location: {passenger.Address}\n\n");
                 else
                     assignmentDetailsTextBox.AppendText($"Pickup Location: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n\n");
-
+                
                 if (assignedVehicle != null)
                 {
                     assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);

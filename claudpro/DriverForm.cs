@@ -9,6 +9,7 @@ using GMap.NET.WindowsForms.Markers;
 using claudpro.Models;
 using claudpro.Services;
 using claudpro.UI;
+using System.Linq;
 
 
 namespace claudpro
@@ -354,104 +355,124 @@ namespace claudpro
             }
         }
 
-private async Task LoadDriverDataAsync()
-{
-    if (refreshButton == null || routeDetailsTextBox == null) return;
-
-    refreshButton.Enabled = false;
-    routeDetailsTextBox.Clear();
-    routeDetailsTextBox.AppendText("Loading route data...\n");
-
-    try
-    {
-        // Load vehicle and route data
-        vehicle = await dbService.GetVehicleByUserIdAsync(userId);
-
-        if (vehicle == null)
+        private async Task LoadDriverDataAsync()
         {
+            if (refreshButton == null || routeDetailsTextBox == null) return;
+
+            refreshButton.Enabled = false;
             routeDetailsTextBox.Clear();
-            routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
-            routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
-            
-            // Initialize with default values
-            vehicle = new Vehicle
+            routeDetailsTextBox.AppendText("Loading route data...\n");
+
+            try
             {
-                UserId = userId,
-                Capacity = 4,
-                IsAvailableTomorrow = true,
-                DriverName = username
-            };
-            
-            return;
-        }
+                // Load vehicle and route data
+                vehicle = await dbService.GetVehicleByUserIdAsync(userId);
 
-        // Update UI controls to reflect vehicle data
-        availabilityCheckBox.Checked = vehicle.IsAvailableTomorrow;
-        capacityNumericUpDown.Value = vehicle.Capacity;
+                if (vehicle == null)
+                {
+                    routeDetailsTextBox.Clear();
+                    routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
+                    routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
 
-        var destination = await dbService.GetDestinationAsync();
+                    // Initialize with default values
+                    vehicle = new Vehicle
+                    {
+                        UserId = userId,
+                        Capacity = 4,
+                        IsAvailableTomorrow = true,
+                        DriverName = username
+                    };
 
-        // Get today's date in the format used by the database
-        TimeSpan timeToAdd = TimeSpan.Parse(destination.TargetTime);
-        DateTime now = DateTime.Now;
-        DateTime targetTime = new DateTime(now.Year, now.Month, now.Day,
-                                                 timeToAdd.Hours, timeToAdd.Minutes, timeToAdd.Seconds);
-        string queryTime = now.ToString("yyyy-MM-dd");
-        if(targetTime < DateTime.Now)
-        {
-            queryTime = now.AddDays(1).ToString("yyyy-MM-dd");
-        }
+                    return;
+                }
 
-        // Get route data
-        var routeData = await dbService.GetDriverRouteAsync(userId, queryTime);
-        
-        // Debug output - remove in production
-        Console.WriteLine($"Retrieved vehicle - Departure time: {routeData.Vehicle?.DepartureTime ?? "null"}");
-        
-        if (routeData.Vehicle != null)
-        {
-            vehicle = routeData.Vehicle;
-        }
-        
-        assignedPassengers = routeData.Passengers ?? new List<Passenger>();
-        
-        // Debug output - remove in production
-        if (assignedPassengers != null)
-        {
-            foreach (var p in assignedPassengers)
+                // Update UI controls to reflect vehicle data
+                availabilityCheckBox.Checked = vehicle.IsAvailableTomorrow;
+                capacityNumericUpDown.Value = vehicle.Capacity;
+
+                var destination = await dbService.GetDestinationAsync();
+
+                // Get today's date in the format used by the database
+                TimeSpan timeToAdd = TimeSpan.Parse(destination.TargetTime);
+                DateTime now = DateTime.Now;
+                DateTime targetTime = new DateTime(now.Year, now.Month, now.Day,
+                                                         timeToAdd.Hours, timeToAdd.Minutes, timeToAdd.Seconds);
+                string queryTime = now.ToString("yyyy-MM-dd");
+                if (targetTime < DateTime.Now)
+                {
+                    queryTime = now.AddDays(1).ToString("yyyy-MM-dd");
+                }
+
+                // Get route data
+                var routeData = await dbService.GetDriverRouteAsync(userId, queryTime);
+
+                // Debug output - remove in production
+                Console.WriteLine($"Retrieved vehicle - Departure time: {routeData.Vehicle?.DepartureTime ?? "null"}");
+
+                if (routeData.Vehicle != null)
+                {
+                    // Important: Make sure to update the vehicle with data from routeData
+                    // This ensures we get the most up-to-date data including departure time
+                    vehicle = routeData.Vehicle;
+                }
+
+                assignedPassengers = routeData.Passengers ?? new List<Passenger>();
+
+                // Debug output - remove in production
+                if (assignedPassengers != null)
+                {
+                    foreach (var p in assignedPassengers)
+                    {
+                        Console.WriteLine($"Passenger {p.Name} - Pickup time: {p.EstimatedPickupTime ?? "null"}");
+                    }
+                }
+
+                pickupTime = routeData.PickupTime;
+
+                // Additional check for departure time from database if it's still null
+                if (string.IsNullOrEmpty(vehicle.DepartureTime) && assignedPassengers != null && assignedPassengers.Count > 0)
+                {
+                    // If we have passengers with pickup times but no departure time,
+                    // we can calculate backward from the first pickup time
+                    var firstPassenger = assignedPassengers.FirstOrDefault();
+                    if (firstPassenger != null && !string.IsNullOrEmpty(firstPassenger.EstimatedPickupTime))
+                    {
+                        if (DateTime.TryParse(firstPassenger.EstimatedPickupTime, out DateTime firstPickup))
+                        {
+                            // Estimate departure time as 10 minutes before first pickup
+                            DateTime estimatedDeparture = firstPickup.AddMinutes(-10);
+                            vehicle.DepartureTime = estimatedDeparture.ToString("HH:mm");
+                            Console.WriteLine($"Estimated departure time: {vehicle.DepartureTime}");
+                        }
+                    }
+                }
+
+                // Clear map and display the route
+                ShowRouteOnMap();
+
+                // Update route details text
+                UpdateRouteDetailsText(pickupTime);
+
+                // Update the address search control with current address
+                if (addressSearchControl != null && !string.IsNullOrEmpty(vehicle.StartAddress))
+                {
+                    addressSearchControl.Address = vehicle.StartAddress;
+                }
+            }
+            catch (Exception ex)
             {
-                Console.WriteLine($"Passenger {p.Name} - Pickup time: {p.EstimatedPickupTime ?? "null"}");
+                routeDetailsTextBox.Clear();
+                routeDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
+
+                // Debug output - remove in production
+                Console.WriteLine($"Error loading driver data: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+            finally
+            {
+                refreshButton.Enabled = true;
             }
         }
-        
-        pickupTime = routeData.PickupTime;
-
-        // Clear map and display the route
-        ShowRouteOnMap();
-
-        // Update route details text
-        UpdateRouteDetailsText(pickupTime);
-
-        // Update the address search control with current address
-        if (addressSearchControl != null && !string.IsNullOrEmpty(vehicle.StartAddress))
-        {
-            addressSearchControl.Address = vehicle.StartAddress;
-        }
-    }
-    catch (Exception ex)
-    {
-        routeDetailsTextBox.Clear();
-        routeDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
-        
-        // Debug output - remove in production
-        Console.WriteLine($"Error loading driver data: {ex.Message}");
-        Console.WriteLine($"Stack trace: {ex.StackTrace}");
-    }
-    finally
-    {
-        refreshButton.Enabled = true;
-    }
-}        // Update the DisplayPassengerOnMap method in DriverForm.cs to show routes
         private void DisplayVehicleAndRouteOnMap()
         {
             if (vehicle == null) return;
@@ -629,88 +650,120 @@ private async Task LoadDriverDataAsync()
             }
         }
         // Updated UpdateRouteDetailsText to show departure time
-private void UpdateRouteDetailsText(DateTime? pickupTime)
-{
-    if (routeDetailsTextBox == null) return;
-
-    routeDetailsTextBox.Clear();
-
-    if (vehicle == null)
-    {
-        routeDetailsTextBox.AppendText("No vehicle assigned.\n");
-        return;
-    }
-
-    routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-    routeDetailsTextBox.AppendText("Your Vehicle Details:\n");
-    routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-    routeDetailsTextBox.AppendText($"Capacity: {vehicle.Capacity} seats\n");
-
-    if (vehicle.StartLatitude == 0 && vehicle.StartLongitude == 0)
-    {
-        routeDetailsTextBox.AppendText("Starting Location: Not set\n\n");
-        routeDetailsTextBox.AppendText("Please set your starting location using the options below.\n");
-    }
-    else if (!string.IsNullOrEmpty(vehicle.StartAddress))
-    {
-        routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n");
-    }
-    else
-    {
-        routeDetailsTextBox.AppendText($"Starting Location: ({vehicle.StartLatitude:F6}, {vehicle.StartLongitude:F6})\n");
-    }
-
-    if (assignedPassengers != null && assignedPassengers.Count > 0)
-    {
-        // Display departure time with bold formatting - using centralized formatter
-        if (!string.IsNullOrEmpty(vehicle.DepartureTime))
+        private void UpdateRouteDetailsText(DateTime? pickupTime)
         {
-            string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
+            if (routeDetailsTextBox == null) return;
+
+            routeDetailsTextBox.Clear();
+
+            if (vehicle == null)
+            {
+                routeDetailsTextBox.AppendText("No vehicle assigned.\n");
+                return;
+            }
+
             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-            routeDetailsTextBox.AppendText($"\nDeparture Time: {formattedDepartureTime}\n\n");
+            routeDetailsTextBox.AppendText("Your Vehicle Details:\n");
             routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-        }
+            routeDetailsTextBox.AppendText($"Capacity: {vehicle.Capacity} seats\n");
 
-        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-        routeDetailsTextBox.AppendText("Assigned Passengers:\n");
-        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-
-        for (int i = 0; i < assignedPassengers.Count; i++)
-        {
-            var passenger = assignedPassengers[i];
-            if (passenger == null) continue;
-
-            routeDetailsTextBox.AppendText($"{i + 1}. {passenger.Name}\n");
-
-            if (!string.IsNullOrEmpty(passenger.Address))
-                routeDetailsTextBox.AppendText($"   Pick-up: {passenger.Address}\n");
+            if (vehicle.StartLatitude == 0 && vehicle.StartLongitude == 0)
+            {
+                routeDetailsTextBox.AppendText("Starting Location: Not set\n\n");
+                routeDetailsTextBox.AppendText("Please set your starting location using the options below.\n");
+            }
+            else if (!string.IsNullOrEmpty(vehicle.StartAddress))
+            {
+                routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n");
+            }
             else
-                routeDetailsTextBox.AppendText($"   Pick-up: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n");
-
-            // Display pickup time with bold formatting - using centralized formatter
-            if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
             {
-                string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
-                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                routeDetailsTextBox.AppendText($"   Pick-up Time: {formattedPickupTime}\n");
-                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-            }
-            else if (i == 0 && pickupTime.HasValue)
-            {
-                // For first passenger, use the pickupTime if no estimated time
-                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                routeDetailsTextBox.AppendText($"   Pick-up Time: {pickupTime.Value.ToString("HH:mm")}\n");
-                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                routeDetailsTextBox.AppendText($"Starting Location: ({vehicle.StartLatitude:F6}, {vehicle.StartLongitude:F6})\n");
             }
 
-            routeDetailsTextBox.AppendText("\n");
+            // Display departure time with proper formatting and handling
+            routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+            routeDetailsTextBox.AppendText("Departure Time: ");
+            routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+
+            if (!string.IsNullOrEmpty(vehicle.DepartureTime))
+            {
+                string formattedDepartureTime;
+                if (DateTime.TryParse(vehicle.DepartureTime, out DateTime dt))
+                {
+                    formattedDepartureTime = dt.ToString("HH:mm");
+                }
+                else
+                {
+                    formattedDepartureTime = vehicle.DepartureTime;
+                }
+                routeDetailsTextBox.AppendText(formattedDepartureTime + "\n");
+            }
+            else if (assignedPassengers != null && assignedPassengers.Count > 0)
+            {
+                // If we have assigned passengers but no departure time, show "Calculating..."
+                routeDetailsTextBox.AppendText("Calculating...\n");
+            }
+            else
+            {
+                routeDetailsTextBox.AppendText("Not yet scheduled\n");
+            }
+
+            if (assignedPassengers != null && assignedPassengers.Count > 0)
+            {
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText("\nAssigned Passengers:\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+
+                for (int i = 0; i < assignedPassengers.Count; i++)
+                {
+                    var passenger = assignedPassengers[i];
+                    if (passenger == null) continue;
+
+                    routeDetailsTextBox.AppendText($"{i + 1}. {passenger.Name}\n");
+
+                    if (!string.IsNullOrEmpty(passenger.Address))
+                        routeDetailsTextBox.AppendText($"   Pick-up: {passenger.Address}\n");
+                    else
+                        routeDetailsTextBox.AppendText($"   Pick-up: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n");
+
+                    // Display pickup time with formatting
+                    if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+                    {
+                        string formattedPickupTime;
+                        if (DateTime.TryParse(passenger.EstimatedPickupTime, out DateTime pt))
+                        {
+                            formattedPickupTime = pt.ToString("HH:mm");
+                        }
+                        else
+                        {
+                            formattedPickupTime = passenger.EstimatedPickupTime;
+                        }
+                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                        routeDetailsTextBox.AppendText($"   Pick-up Time: {formattedPickupTime}\n");
+                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                    }
+                    else if (i == 0 && pickupTime.HasValue)
+                    {
+                        // For first passenger, use the pickupTime if no estimated time
+                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                        routeDetailsTextBox.AppendText($"   Pick-up Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                    }
+                    else
+                    {
+                        routeDetailsTextBox.AppendText("   Pick-up Time: Not yet scheduled\n");
+                    }
+
+                    routeDetailsTextBox.AppendText("\n");
+                }
+            }
+            else
+            {
+                routeDetailsTextBox.AppendText("\nNo passengers assigned for today's route.\n");
+            }
         }
-    }
-    else
-    {
-        routeDetailsTextBox.AppendText("\nNo passengers assigned for today's route.\n");
-    }
-}        private async Task UpdateAvailabilityAsync()
+        private async Task UpdateAvailabilityAsync()
         {
             if (vehicle == null || availabilityCheckBox == null)
                 return;

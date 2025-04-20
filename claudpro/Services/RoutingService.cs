@@ -142,8 +142,7 @@ namespace claudpro.Services
         /// <summary>
         /// Gets detailed route information using Google Maps Directions API
         /// </summary>
-
-        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime?   destinationTargetTime)
+        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime? destinationTargetTime)
         {
             if (solution == null) return;
 
@@ -191,16 +190,41 @@ namespace claudpro.Services
                         vehicle.DepartureTime = routeDetails.DepartureTime;
                         Console.WriteLine($"Updated vehicle {vehicle.Id} departure time to: {vehicle.DepartureTime} (24-hour format)");
                     }
+                    else if (destinationTargetTime.HasValue && vehicle.AssignedPassengers.Count > 0)
+                    {
+                        // If API didn't provide departure time but we have a target arrival time,
+                        // calculate departure time based on total travel time
+                        DateTime estimatedDeparture = destinationTargetTime.Value.AddMinutes(-routeDetails.TotalTime);
+                        vehicle.DepartureTime = estimatedDeparture.ToString("HH:mm");
+                        Console.WriteLine($"Calculated vehicle {vehicle.Id} departure time: {vehicle.DepartureTime} (based on arrival time)");
+                    }
 
                     // Update pickup times for passengers
                     for (int j = 0; j < vehicle.AssignedPassengers.Count; j++)
                     {
-                        if (j < routeDetails.StopDetails.Count &&
-                            routeDetails.StopDetails[j].PassengerId == vehicle.AssignedPassengers[j].Id &&
-                            !string.IsNullOrEmpty(routeDetails.StopDetails[j].EstimatedArrivalTime))
+                        if (j < routeDetails.StopDetails.Count)
                         {
-                            vehicle.AssignedPassengers[j].EstimatedPickupTime = routeDetails.StopDetails[j].EstimatedArrivalTime;
-                            Console.WriteLine($"Updated passenger {vehicle.AssignedPassengers[j].Id} pickup time to: {vehicle.AssignedPassengers[j].EstimatedPickupTime} (24-hour format)");
+                            var stopDetail = routeDetails.StopDetails[j];
+                            var passenger = vehicle.AssignedPassengers[j];
+
+                            // Ensure the matching is correct (StopDetails order might not match AssignedPassengers order)
+                            if (stopDetail.PassengerId == passenger.Id && !string.IsNullOrEmpty(stopDetail.EstimatedArrivalTime))
+                            {
+                                passenger.EstimatedPickupTime = stopDetail.EstimatedArrivalTime;
+                                Console.WriteLine($"Updated passenger {passenger.Id} pickup time to: {passenger.EstimatedPickupTime}");
+                            }
+                            else if (string.IsNullOrEmpty(passenger.EstimatedPickupTime) && !string.IsNullOrEmpty(vehicle.DepartureTime))
+                            {
+                                // If no arrival time from API, estimate based on cumulative time
+                                double cumulativeMinutes = stopDetail.CumulativeTime;
+
+                                if (DateTime.TryParse(vehicle.DepartureTime, out DateTime depTime))
+                                {
+                                    DateTime estPickupTime = depTime.AddMinutes(cumulativeMinutes);
+                                    passenger.EstimatedPickupTime = estPickupTime.ToString("HH:mm");
+                                    Console.WriteLine($"Calculated passenger {passenger.Id} pickup time: {passenger.EstimatedPickupTime} (based on departure + cumulative time)");
+                                }
+                            }
                         }
                     }
                 }
@@ -241,7 +265,6 @@ namespace claudpro.Services
                 mapControl.Zoom = mapControl.Zoom; // Force refresh
             }
         }
-
 
         /// Calculates estimated route details for a solution without using Google API
         /// </summary>
