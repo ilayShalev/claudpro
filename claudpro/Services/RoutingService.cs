@@ -19,14 +19,26 @@ namespace claudpro.Services
         private  MapService mapService;
         private  double destinationLat;
         private  double destinationLng;
+        private string destinationTargetTime;
         public Dictionary<int, RouteDetails> VehicleRouteDetails { get; private set; }
 
-        public RoutingService(MapService mapService, double destinationLat, double destinationLng)
+        public RoutingService(MapService mapService, double destinationLat, double destinationLng, string destinationTargetTime)
         {
             this.mapService = mapService;
             this.destinationLat = destinationLat;
             this.destinationLng = destinationLng;
+
+
+            DateTime? targetDateTime = null;
+
+            if (TimeSpan.TryParse(destinationTargetTime, out TimeSpan targetTime))
+            {
+                targetDateTime = DateTime.Today.AddDays(1).Add(targetTime); // למשל: מחר בשעה 08:00
+            }
+
+            this.destinationTargetTime = destinationTargetTime;
             VehicleRouteDetails = new Dictionary<int, RouteDetails>();
+
         }
 
         /// <summary>
@@ -130,9 +142,8 @@ namespace claudpro.Services
         /// <summary>
         /// Gets detailed route information using Google Maps Directions API
         /// </summary>
-        // Update GetGoogleRoutesAsync in RoutingService.cs to handle time formats consistently
 
-        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime? targetArrivalTime = null)
+        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime?   destinationTargetTime)
         {
             if (solution == null) return;
 
@@ -156,9 +167,9 @@ namespace claudpro.Services
             var colors = mapControl != null ? MapOverlays.GetRouteColors() : null;
 
             // Log the target arrival time for debugging
-            if (targetArrivalTime.HasValue)
+            if (destinationTargetTime.HasValue)
             {
-                Console.WriteLine($"Target arrival time for route calculation: {targetArrivalTime.Value.ToString("yyyy-MM-dd HH:mm:ss")}");
+                Console.WriteLine($"Target arrival time for route calculation: {destinationTargetTime.Value.ToString("yyyy-MM-dd HH:mm:ss")}");
             }
 
             for (int i = 0; i < solution.Vehicles.Count; i++)
@@ -167,7 +178,7 @@ namespace claudpro.Services
                 if (vehicle.AssignedPassengers.Count == 0) continue;
 
                 // Get route details from Google API, passing the target arrival time
-                var routeDetails = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, targetArrivalTime);
+                var routeDetails = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, destinationTargetTime);
                 if (routeDetails != null)
                 {
                     VehicleRouteDetails[vehicle.Id] = routeDetails;
@@ -211,7 +222,7 @@ namespace claudpro.Services
                 points.Add(new PointLatLng(destinationLat, destinationLng));
 
                 // Get directions from Google Maps - pass the target arrival time to get traffic-based directions
-                var routePoints = await mapService.GetGoogleDirectionsAsync(points, targetArrivalTime);
+                var routePoints = await mapService.GetGoogleDirectionsAsync(points, destinationTargetTime);
 
                 if (routePoints != null && routePoints.Count > 0)
                 {
@@ -231,22 +242,6 @@ namespace claudpro.Services
             }
         }
 
-        // Add this helper method to safely format times for display
-        public string FormatTimeForDisplay(string time24Hour)
-        {
-            if (string.IsNullOrEmpty(time24Hour))
-                return "Not scheduled";
-
-            // Try to parse the 24-hour time format
-            if (DateTime.TryParse(time24Hour, out DateTime parsedTime))
-            {
-                // Return in 24-hour format for consistency in the UI
-                return parsedTime.ToString("HH:mm");
-            }
-
-            // Return the original if parsing fails
-            return time24Hour;
-        }
 
         /// Calculates estimated route details for a solution without using Google API
         /// </summary>
@@ -269,6 +264,19 @@ namespace claudpro.Services
                 }
             }
         }
+
+
+        public async Task CalculateRouteDetailsFromApiAsync(Solution solution)
+        {
+            foreach (var vehicle in solution.Vehicles)
+            {
+                DateTime? departure = DateTime.TryParse(vehicle.DepartureTime, out var dt) ? dt : (DateTime?)null;
+
+                var details = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, departure);
+                VehicleRouteDetails[vehicle.Id] = details;
+            }
+        }
+
 
         /// <summary>
         /// Validates the solution for constraints like capacity and passenger assignment

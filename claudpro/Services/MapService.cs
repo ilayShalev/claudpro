@@ -471,7 +471,11 @@ namespace claudpro.Services
                 Console.WriteLine($"Error getting route details: {ex.Message}");
                 throw;
             }
-        }                          /// </summary>
+        }
+        /// </summary>
+        /// 
+
+
         public RouteDetails EstimateRouteDetails(Vehicle vehicle, double destinationLat, double destinationLng)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)

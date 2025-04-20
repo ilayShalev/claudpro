@@ -225,7 +225,6 @@ namespace RideMatchScheduler
         // to use Google API for time calculations based on desired arrival time
 
 
-        // עדכון מתודת RunAlgorithmAsync ב-RideMatchSchedulerService.cs
         private async Task RunAlgorithmAsync()
         {
             try
@@ -270,7 +269,6 @@ namespace RideMatchScheduler
                             bool shouldUseGoogleApi = useGoogleApi == "1";
 
                             // Always calculate estimated routes first as a fallback
-                            routingService.CalculateEstimatedRouteDetails(solution);
 
                             if (shouldUseGoogleApi)
                             {

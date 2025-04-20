@@ -629,89 +629,88 @@ private async Task LoadDriverDataAsync()
             }
         }
         // Updated UpdateRouteDetailsText to show departure time
-        private void UpdateRouteDetailsText(DateTime? pickupTime)
+private void UpdateRouteDetailsText(DateTime? pickupTime)
+{
+    if (routeDetailsTextBox == null) return;
+
+    routeDetailsTextBox.Clear();
+
+    if (vehicle == null)
+    {
+        routeDetailsTextBox.AppendText("No vehicle assigned.\n");
+        return;
+    }
+
+    routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+    routeDetailsTextBox.AppendText("Your Vehicle Details:\n");
+    routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+    routeDetailsTextBox.AppendText($"Capacity: {vehicle.Capacity} seats\n");
+
+    if (vehicle.StartLatitude == 0 && vehicle.StartLongitude == 0)
+    {
+        routeDetailsTextBox.AppendText("Starting Location: Not set\n\n");
+        routeDetailsTextBox.AppendText("Please set your starting location using the options below.\n");
+    }
+    else if (!string.IsNullOrEmpty(vehicle.StartAddress))
+    {
+        routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n");
+    }
+    else
+    {
+        routeDetailsTextBox.AppendText($"Starting Location: ({vehicle.StartLatitude:F6}, {vehicle.StartLongitude:F6})\n");
+    }
+
+    if (assignedPassengers != null && assignedPassengers.Count > 0)
+    {
+        // Display departure time with bold formatting - using centralized formatter
+        if (!string.IsNullOrEmpty(vehicle.DepartureTime))
         {
-            if (routeDetailsTextBox == null) return;
-
-            routeDetailsTextBox.Clear();
-
-            if (vehicle == null)
-            {
-                routeDetailsTextBox.AppendText("No vehicle assigned.\n");
-                return;
-            }
-
+            string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-            routeDetailsTextBox.AppendText("Your Vehicle Details:\n");
+            routeDetailsTextBox.AppendText($"\nDeparture Time: {formattedDepartureTime}\n\n");
             routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-            routeDetailsTextBox.AppendText($"Capacity: {vehicle.Capacity} seats\n");
-
-            if (vehicle.StartLatitude == 0 && vehicle.StartLongitude == 0)
-            {
-                routeDetailsTextBox.AppendText("Starting Location: Not set\n\n");
-                routeDetailsTextBox.AppendText("Please set your starting location using the options below.\n");
-            }
-            else if (!string.IsNullOrEmpty(vehicle.StartAddress))
-            {
-                routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n");
-            }
-            else
-            {
-                routeDetailsTextBox.AppendText($"Starting Location: ({vehicle.StartLatitude:F6}, {vehicle.StartLongitude:F6})\n");
-            }
-
-            if (assignedPassengers != null && assignedPassengers.Count > 0)
-            {
-                // Display departure time with bold formatting - using centralized formatter
-                if (!string.IsNullOrEmpty(vehicle.DepartureTime))
-                {
-                    string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
-                    routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                    routeDetailsTextBox.AppendText($"\nDeparture Time: {formattedDepartureTime}\n\n");
-                    routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-                }
-
-                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                routeDetailsTextBox.AppendText("Assigned Passengers:\n");
-                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-
-                for (int i = 0; i < assignedPassengers.Count; i++)
-                {
-                    var passenger = assignedPassengers[i];
-                    if (passenger == null) continue;
-
-                    routeDetailsTextBox.AppendText($"{i + 1}. {passenger.Name}\n");
-
-                    if (!string.IsNullOrEmpty(passenger.Address))
-                        routeDetailsTextBox.AppendText($"   Pick-up: {passenger.Address}\n");
-                    else
-                        routeDetailsTextBox.AppendText($"   Pick-up: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n");
-
-                    // Display pickup time with bold formatting - using centralized formatter
-                    if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
-                    {
-                        string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
-                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                        routeDetailsTextBox.AppendText($"   Pick-up Time: {formattedPickupTime}\n");
-                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-                    }
-                    else if (i == 0 && pickupTime.HasValue)
-                    {
-                        // For first passenger, use the pickupTime if no estimated time
-                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                        routeDetailsTextBox.AppendText($"   Pick-up Time: {pickupTime.Value.ToString("HH:mm")}\n");
-                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-                    }
-
-                    routeDetailsTextBox.AppendText("\n");
-                }
-            }
-            else
-            {
-                routeDetailsTextBox.AppendText("\nNo passengers assigned for today's route.\n");
-            }
         }
-        private async Task UpdateAvailabilityAsync()
+
+        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+        routeDetailsTextBox.AppendText("Assigned Passengers:\n");
+        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+
+        for (int i = 0; i < assignedPassengers.Count; i++)
+        {
+            var passenger = assignedPassengers[i];
+            if (passenger == null) continue;
+
+            routeDetailsTextBox.AppendText($"{i + 1}. {passenger.Name}\n");
+
+            if (!string.IsNullOrEmpty(passenger.Address))
+                routeDetailsTextBox.AppendText($"   Pick-up: {passenger.Address}\n");
+            else
+                routeDetailsTextBox.AppendText($"   Pick-up: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n");
+
+            // Display pickup time with bold formatting - using centralized formatter
+            if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+            {
+                string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText($"   Pick-up Time: {formattedPickupTime}\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+            }
+            else if (i == 0 && pickupTime.HasValue)
+            {
+                // For first passenger, use the pickupTime if no estimated time
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText($"   Pick-up Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+            }
+
+            routeDetailsTextBox.AppendText("\n");
+        }
+    }
+    else
+    {
+        routeDetailsTextBox.AppendText("\nNo passengers assigned for today's route.\n");
+    }
+}        private async Task UpdateAvailabilityAsync()
         {
             if (vehicle == null || availabilityCheckBox == null)
                 return;

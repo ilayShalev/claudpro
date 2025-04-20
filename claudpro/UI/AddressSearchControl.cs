@@ -133,7 +133,7 @@ namespace claudpro.UI
                     mapControl.Overlays.Add(overlay);
 
                     // Remove the marker after 5 seconds
-                    System.Threading.Tasks.Task.Delay(5000).ContinueWith(t =>
+                    await System.Threading.Tasks.Task.Delay(5000).ContinueWith(t =>
                     {
                         if (IsDisposed) return;
 

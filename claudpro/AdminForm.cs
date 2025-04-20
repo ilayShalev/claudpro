@@ -66,7 +66,7 @@ namespace claudpro
                 destinationTargetTime = dest.TargetTime;
 
                 // Initialize routing and algorithm services
-                routingService = new RoutingService(mapService, destinationLat, destinationLng);
+                routingService = new RoutingService(mapService, destinationLat, destinationLng, destinationTargetTime);
 
                 // Load data on form load
                 await LoadAllDataAsync();
@@ -611,10 +611,15 @@ namespace claudpro
 
                     // Create a new routing service with the destination
                     var destination = await dbService.GetDestinationAsync();
-                    var tempRoutingService = new RoutingService(mapService, destination.Latitude, destination.Longitude);
+                    var tempRoutingService = new RoutingService(mapService, destination.Latitude, destination.Longitude,destinationTargetTime);
 
-                    // Get the Google routes
-                    await tempRoutingService.GetGoogleRoutesAsync(gMapControl, currentSolution);
+
+                    TimeSpan targetTime;
+                    if (TimeSpan.TryParse(destinationTargetTime, out TimeSpan))
+                    {
+                        targetDateTime = DateTime.Today.AddDays(1).Add(targetTime); // למשל: מחר בשעה 08:00
+                    }
+                    await tempRoutingService.GetGoogleRoutesAsync(gMapControl, currentSolution, targetDateTime);
 
                     // Update the UI
                     UpdateRouteDetailsDisplay();
@@ -1089,7 +1094,7 @@ namespace claudpro
                 if (passengers.Count > 0 && vehicles.Count > 0)
                 {
                     // Create a routing service
-                    var routingService = new RoutingService(mapService, destination.Latitude, destination.Longitude);
+                    var routingService = new RoutingService(mapService, destination.Latitude, destination.Longitude , destinationTargetTime);
 
                     // Create the solver
                     var solver = new RideSharingGenetic(
@@ -1107,40 +1112,7 @@ namespace claudpro
                     if (solution != null)
                     {
                         // After running the algorithm, apply routes based on settings
-                        try
-                        {
-                            // Check if Google Routes API should be used
-                            string useGoogleApi = await dbService.GetSettingAsync("UseGoogleRoutesAPI", "1");
-                            bool shouldUseGoogleApi = useGoogleApi == "1";
-
-                            // Always calculate estimated routes first as a fallback
-                            routingService.CalculateEstimatedRouteDetails(solution);
-
-                            if (shouldUseGoogleApi)
-                            {
-                                try
-                                {
-                                    // Try to get routes from Google API
-                                    MessageBox.Show("Fetching routes from Google Maps API...", "Status", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                                    await routingService.GetGoogleRoutesAsync(null, solution);
-                                    MessageBox.Show("Successfully retrieved routes from Google Maps API", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                                }
-                                catch (Exception ex)
-                                {
-                                    // If Google API fails, we already have the estimated routes calculated
-                                    MessageBox.Show($"Google API request failed: {ex.Message}. Using estimated routes instead.",
-                                        "API Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                }
-                            }
-
-                            // Calculate backward from target arrival time to determine pickup times
-                            await CalculatePickupTimesBasedOnTargetArrival(solution, destination.TargetTime, routingService);
-                        }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show($"Error calculating routes: {ex.Message}",
-                                "Route Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
+                     
 
                         // Save the solution to database for tomorrow's date
                         string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
