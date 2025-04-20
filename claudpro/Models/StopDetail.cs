@@ -1,4 +1,5 @@
-﻿using System;
+﻿// עדכון ל-StopDetail.cs
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -15,5 +16,9 @@ namespace claudpro.Models
         public double TimeFromPrevious { get; set; }
         public double CumulativeDistance { get; set; }
         public double CumulativeTime { get; set; }
+
+        // הוספת תמיכה בזמני הגעה ויציאה כמחרוזות
+        public string EstimatedArrivalTime { get; set; }
+        public string EstimatedDepartureTime { get; set; }
     }
 }

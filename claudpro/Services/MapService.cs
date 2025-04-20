@@ -180,13 +180,18 @@ namespace claudpro.Services
         /// <summary>
         /// Fetches directions from Google Maps Directions API
         /// </summary>
-        public async Task<List<PointLatLng>> GetGoogleDirectionsAsync(List<PointLatLng> waypoints)
+        public async Task<List<PointLatLng>> GetGoogleDirectionsAsync(List<PointLatLng> waypoints, DateTime? targetArrivalTime = null)
         {
             if (waypoints == null || waypoints.Count < 2) return null;
 
             try
             {
                 string cacheKey = string.Join("|", waypoints.Select(p => $"{p.Lat},{p.Lng}"));
+                if (targetArrivalTime.HasValue)
+                {
+                    cacheKey += $"|arrival_{targetArrivalTime.Value.ToString("yyyy-MM-dd HH:mm:ss")}";
+                }
+
                 if (routeCache.ContainsKey(cacheKey)) return routeCache[cacheKey];
 
                 var origin = waypoints[0];
@@ -196,8 +201,35 @@ namespace claudpro.Services
                 string url = $"https://maps.googleapis.com/maps/api/directions/json?" +
                     $"origin={origin.Lat},{origin.Lng}&" +
                     $"destination={destination.Lat},{destination.Lng}&" +
-                    (intermediates.Any() ? $"waypoints={string.Join("|", intermediates.Select(p => $"{p.Lat},{p.Lng}"))}&" : "") +
-                    $"key={apiKey}";
+                    (intermediates.Any() ? $"waypoints={string.Join("|", intermediates.Select(p => $"{p.Lat},{p.Lng}"))}&" : "");
+
+                // הוספת פרמטר זמן הגעה אם סופק
+                if (targetArrivalTime.HasValue)
+                {
+                    // וידוא שהתאריך הוא עתידי - אם התאריך קטן מהעכשיו, נשתמש במחר
+                    DateTime futureArrivalTime = targetArrivalTime.Value;
+                    if (futureArrivalTime <= DateTime.Now)
+                    {
+                        // הערה: אנחנו משתמשים בתאריך של מחר עם השעה המקורית
+                        // שעות בפורמט 24 שעות נשמרות נכון
+                        futureArrivalTime = DateTime.Today.AddDays(1) + targetArrivalTime.Value.TimeOfDay;
+
+                        // בדיקה אם אחרי התיקון עדיין לא בעתיד
+                        if (futureArrivalTime <= DateTime.Now)
+                        {
+                            // אם עדיין בעבר, נוסיף עוד יום
+                            futureArrivalTime = futureArrivalTime.AddDays(1);
+                        }
+                    }
+
+                    // המרת התאריך לפורמט Unix timestamp
+                    var unixTimestamp = (long)((DateTimeOffset)futureArrivalTime).ToUnixTimeSeconds();
+                    url += $"arrival_time={unixTimestamp}&";
+
+                    Console.WriteLine($"Using future arrival time: {futureArrivalTime.ToString("yyyy-MM-dd HH:mm:ss")} (Unix: {unixTimestamp})");
+                }
+
+                url += $"key={apiKey}";
 
                 var response = await httpClient.GetStringAsync(url);
                 dynamic data = JsonConvert.DeserializeObject(response);
@@ -229,11 +261,10 @@ namespace claudpro.Services
                 return null;
             }
         }
-
-        /// <summary>
         /// Gets route details from the Google Directions API
         /// </summary>
-        public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng)
+        // עדכון למתודה GetRouteDetailsAsync ב-MapService.cs
+        public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng, DateTime? targetArrivalTime = null)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
                 return null;
@@ -248,8 +279,35 @@ namespace claudpro.Services
                 string url = $"https://maps.googleapis.com/maps/api/directions/json?" +
                     $"origin={origin}" +
                     $"&destination={destination}" +
-                    (vehicle.AssignedPassengers.Any() ? $"&waypoints={waypointsStr}" : "") +
-                    $"&key={apiKey}";
+                    (vehicle.AssignedPassengers.Any() ? $"&waypoints={waypointsStr}" : "");
+
+                // אם יש זמן הגעה מטרה, משתמשים בו במקום זמן יציאה
+                if (targetArrivalTime.HasValue)
+                {
+                    // וידוא שהתאריך הוא עתידי - אם התאריך קטן מהיום, נשתמש במחר 
+                    DateTime futureArrivalTime = targetArrivalTime.Value;
+                    if (futureArrivalTime <= DateTime.Now)
+                    {
+                        // הערה: אנחנו משתמשים בתאריך של מחר עם השעה המקורית
+                        // שעות בפורמט 24 שעות נשמרות נכון
+                        futureArrivalTime = DateTime.Today.AddDays(1) + targetArrivalTime.Value.TimeOfDay;
+
+                        // בדיקה אם אחרי התיקון עדיין לא בעתיד
+                        if (futureArrivalTime <= DateTime.Now)
+                        {
+                            // אם עדיין בעבר, נוסיף עוד יום
+                            futureArrivalTime = futureArrivalTime.AddDays(1);
+                        }
+                    }
+
+                    // המרת התאריך לפורמט Unix timestamp
+                    var unixTimestamp = (long)((DateTimeOffset)futureArrivalTime).ToUnixTimeSeconds();
+                    url += $"&arrival_time={unixTimestamp}";
+
+                    Console.WriteLine($"Using future arrival time: {futureArrivalTime.ToString("yyyy-MM-dd HH:mm:ss")} (Unix: {unixTimestamp})");
+                }
+
+                url += $"&key={apiKey}";
 
                 var response = await httpClient.GetStringAsync(url);
                 dynamic data = JsonConvert.DeserializeObject(response);
@@ -293,6 +351,22 @@ namespace claudpro.Services
                         ? vehicle.AssignedPassengers[i].Id
                         : -1;
 
+                    // שמירת זמן ההגעה המשוער לכל נקודת עצירה (אם מסופק בתשובה)
+                    string estimatedArrivalTime = null;
+                    if (leg.arrival_time != null)
+                    {
+                        estimatedArrivalTime = leg.arrival_time.text.ToString();
+                        Console.WriteLine($"Stop {i + 1} arrival time from API: {estimatedArrivalTime}");
+                    }
+
+                    // שמירת זמן היציאה המשוער מכל נקודת עצירה (אם מסופק בתשובה)
+                    string estimatedDepartureTime = null;
+                    if (leg.departure_time != null)
+                    {
+                        estimatedDepartureTime = leg.departure_time.text.ToString();
+                        Console.WriteLine($"Stop {i + 1} departure time from API: {estimatedDepartureTime}");
+                    }
+
                     routeDetail.StopDetails.Add(new StopDetail
                     {
                         StopNumber = i + 1,
@@ -301,8 +375,19 @@ namespace claudpro.Services
                         DistanceFromPrevious = distance,
                         TimeFromPrevious = time,
                         CumulativeDistance = totalDistance,
-                        CumulativeTime = totalTime
+                        CumulativeTime = totalTime,
+                        EstimatedArrivalTime = estimatedArrivalTime,
+                        EstimatedDepartureTime = estimatedDepartureTime
                     });
+                }
+
+                // שומרים את זמן היציאה הראשוני אם יש
+                if (data.routes[0].legs.Count > 0 && data.routes[0].legs[0].departure_time != null)
+                {
+                    string departureTime = data.routes[0].legs[0].departure_time.text.ToString();
+                    vehicle.DepartureTime = departureTime;
+                    routeDetail.DepartureTime = departureTime;
+                    Console.WriteLine($"Vehicle departure time from API: {departureTime}");
                 }
 
                 routeDetail.TotalDistance = totalDistance;
@@ -312,17 +397,11 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error getting route details: {ex.Message}",
-                   "Route Details Error",
-                   MessageBoxButtons.OK,
-                   MessageBoxIcon.Warning);
-                return null;
+                Console.WriteLine($"Error getting route details: {ex.Message}");
+                throw;
             }
-        }
-
-        /// <summary>
-        /// Estimates route details using straight-line distances when Google API is not available
-        /// </summary>
+        }                 /// Estimates route details using straight-line distances when Google API is not available
+                          /// </summary>
         public RouteDetails EstimateRouteDetails(Vehicle vehicle, double destinationLat, double destinationLng)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)

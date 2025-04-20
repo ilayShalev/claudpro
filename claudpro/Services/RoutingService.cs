@@ -131,7 +131,8 @@ namespace claudpro.Services
         /// Gets detailed route information using Google Maps Directions API
         /// </summary>
         // Update GetGoogleRoutesAsync in RoutingService.cs to support null GMapControl
-        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution)
+        // עדכון לשיטה GetGoogleRoutesAsync ב-RoutingService.cs
+        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime? targetArrivalTime = null)
         {
             if (solution == null) return;
 
@@ -159,13 +160,31 @@ namespace claudpro.Services
                 var vehicle = solution.Vehicles[i];
                 if (vehicle.AssignedPassengers.Count == 0) continue;
 
-                // Get route details from Google API
-                var routeDetails = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng);
+                // Get route details from Google API, passing the target arrival time
+                var routeDetails = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, targetArrivalTime);
                 if (routeDetails != null)
                 {
                     VehicleRouteDetails[vehicle.Id] = routeDetails;
                     vehicle.TotalDistance = routeDetails.TotalDistance;
                     vehicle.TotalTime = routeDetails.TotalTime;
+
+                    // עדכון זמן היציאה של הרכב מהתשובה של גוגל מפות
+                    if (!string.IsNullOrEmpty(routeDetails.DepartureTime))
+                    {
+                        vehicle.DepartureTime = routeDetails.DepartureTime;
+                    }
+
+                    // עדכון זמני איסוף לנוסעים
+                    for (int j = 0; j < vehicle.AssignedPassengers.Count; j++)
+                    {
+                        if (j < routeDetails.StopDetails.Count &&
+                            routeDetails.StopDetails[j].PassengerId == vehicle.AssignedPassengers[j].Id &&
+                            !string.IsNullOrEmpty(routeDetails.StopDetails[j].EstimatedArrivalTime))
+                        {
+                            vehicle.AssignedPassengers[j].EstimatedPickupTime =
+                                routeDetails.StopDetails[j].EstimatedArrivalTime;
+                        }
+                    }
                 }
 
                 // Skip route visualization if no map control provided (headless mode)
@@ -203,10 +222,9 @@ namespace claudpro.Services
             {
                 mapControl.Zoom = mapControl.Zoom; // Force refresh
             }
-        }
-        /// <summary>
-        /// Calculates estimated route details for a solution without using Google API
-        /// </summary>
+        }        /// <summary>
+                 /// Calculates estimated route details for a solution without using Google API
+                 /// </summary>
         public void CalculateEstimatedRouteDetails(Solution solution)
         {
             if (solution == null) return;
