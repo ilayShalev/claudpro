@@ -396,7 +396,7 @@ namespace claudpro
                     // Show pickup time with proper formatting using the centralized formatter
                     if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                     {
-                        string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
+                        string formattedPickupTime = claudpro.Utilities.TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                         assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
                         assignmentDetailsTextBox.AppendText($"Pickup Time: {formattedPickupTime}\n");
                         assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;

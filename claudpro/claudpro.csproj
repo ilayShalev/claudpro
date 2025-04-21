@@ -79,6 +79,7 @@
     <Reference Include="System.Diagnostics.EventLog, Version=9.0.0.3, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Diagnostics.EventLog.9.0.3\lib\net462\System.Diagnostics.EventLog.dll</HintPath>
     </Reference>
+    <Reference Include="System.Security" />
     <Reference Include="System.Security.Principal.Windows, Version=5.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Security.Principal.Windows.5.0.0\lib\net461\System.Security.Principal.Windows.dll</HintPath>
     </Reference>
@@ -134,7 +135,9 @@
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Services\ApiKeyManager.cs" />
     <Compile Include="Services\DatabaseService.cs" />
+    <Compile Include="Services\DatabaseServiceMigrations.cs" />
     <Compile Include="Services\MapService.cs" />
     <Compile Include="Services\RideSharingGenetic.cs" />
     <Compile Include="Services\RoutingService.cs" />
@@ -143,12 +146,14 @@
     </Compile>
     <Compile Include="UI\ControlExtensions.cs" />
     <Compile Include="UI\MapOverlays.cs" />
-    <Compile Include="Services\RepeatsFunctions.cs" />
+    <Compile Include="UI\UIStandards.cs" />
     <Compile Include="UI\UserEditForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Utilities\ErrorHandler.cs" />
     <Compile Include="Utilities\GeoCalculator.cs" />
     <Compile Include="Utilities\PolylineEncoder.cs" />
+    <Compile Include="Utilities\TimeFormatUtility.cs" />
     <EmbeddedResource Include="AdminForm.resx">
       <DependentUpon>AdminForm.cs</DependentUpon>
     </EmbeddedResource>

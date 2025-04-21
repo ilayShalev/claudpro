@@ -1532,20 +1532,17 @@ namespace claudpro
                 routeDetailsTextBox.AppendText($"Total Distance: {routeDetails.TotalDistance:F2} km\n");
                 routeDetailsTextBox.AppendText($"Total Time: {routeDetails.TotalTime:F2} minutes\n");
 
-                // Update vehicle object to match routing service data
-                vehicle.TotalDistance = routeDetails.TotalDistance;
-                vehicle.TotalTime = routeDetails.TotalTime;
             }
-            else
-            {
-                routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
-                routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
-            }
+            //else
+            //{
+            //    routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
+            //    routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
+            //}
 
             // Format and display departure time
             if (!string.IsNullOrEmpty(vehicle.DepartureTime))
             {
-                string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
+                string formattedDepartureTime = claudpro.Utilities.TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
                 routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                 routeDetailsTextBox.AppendText($"Departure Time: {formattedDepartureTime}\n");
                 routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
@@ -1553,14 +1550,7 @@ namespace claudpro
             routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
             routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
 
-            // Add departure time if available - using centralized formatter
-            if (!string.IsNullOrEmpty(vehicle.DepartureTime))
-            {
-                string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
-                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                routeDetailsTextBox.AppendText($"Departure Time: {formattedDepartureTime}\n");
-                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-            }
+ 
 
             routeDetailsTextBox.AppendText("\n");
             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
@@ -1586,7 +1576,7 @@ namespace claudpro
                 // Display estimated pickup time using centralized formatter
                 if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                 {
-                    string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
+                    string formattedPickupTime = claudpro.Utilities.TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                     routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                     routeDetailsTextBox.AppendText($"   Estimated pickup time: {formattedPickupTime}\n");
                     routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
@@ -1625,7 +1615,7 @@ namespace claudpro
                 // Display departure time using the centralized formatter
                 if (!string.IsNullOrEmpty(vehicle?.DepartureTime))
                 {
-                    string formattedDepartureTime = TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
+                    string formattedDepartureTime = claudpro.Utilities.TimeFormatUtility.FormatTimeDisplay(vehicle.DepartureTime);
                     routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                     routeDetailsTextBox.AppendText($"Departure Time: {formattedDepartureTime}\n");
                     routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
@@ -1657,7 +1647,7 @@ namespace claudpro
                         // Display estimated pickup time using the centralized formatter
                         if (passenger != null && !string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                         {
-                            string formattedPickupTime = TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
+                            string formattedPickupTime =claudpro.Utilities.TimeFormatUtility.FormatTimeDisplay(passenger.EstimatedPickupTime);
                             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                             routeDetailsTextBox.AppendText($"   Pickup Time: {formattedPickupTime}\n");
                             routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;

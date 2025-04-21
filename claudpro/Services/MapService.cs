@@ -1,74 +1,61 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using System.Net.Http;
 using System.Windows.Forms;
-using System.Configuration;
-using System.Drawing;
 using GMap.NET;
 using GMap.NET.MapProviders;
 using GMap.NET.WindowsForms;
-using GMap.NET.WindowsForms.Markers;
 using Newtonsoft.Json;
 using claudpro.Models;
 using claudpro.Utilities;
+using System.Linq;
 
 namespace claudpro.Services
 {
     public class MapService : IDisposable
     {
         private readonly string apiKey;
-        private readonly HttpClient httpClient;
+        private readonly System.Net.Http.HttpClient httpClient;
         private readonly Dictionary<string, List<PointLatLng>> routeCache = new Dictionary<string, List<PointLatLng>>();
         private bool isDisposed = false;
 
-        public MapService(string apiKey = null)
+        // API request limiter
+        private DateTime lastApiCall = DateTime.MinValue;
+        private const int MinApiCallIntervalMs = 300; // Minimum time between API calls
+        private const int MaxRetries = 3; // Maximum retry attempts for API calls
+
+        // Cache expiration timespan
+        private const int CacheExpirationHours = 24;
+
+        public MapService()
         {
-            // Use provided API key or try to load from config
-            if (string.IsNullOrEmpty(apiKey))
+            this.httpClient = new System.Net.Http.HttpClient();
+
+            // Set timeout for HTTP requests
+            this.httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+            // Initialize GMap providers
+            try
             {
-                apiKey = ConfigurationManager.AppSettings["GoogleApiKey"];
+                // Initialize GMap
+                GMaps.Instance.Mode = AccessMode.ServerAndCache;
 
-                // If still empty, show a dialog to enter it
-                if (string.IsNullOrEmpty(apiKey))
-                {
-                    using (var form = new Form())
-                    {
-                        form.Width = 400;
-                        form.Height = 150;
-                        form.Text = "Google API Key Required";
-
-                        var label = new Label { Left = 20, Top = 20, Text = "Please enter your Google Maps API Key:", Width = 360 };
-                        var textBox = new TextBox { Left = 20, Top = 50, Width = 360 };
-                        var button = new Button { Text = "OK", Left = 160, Top = 80, DialogResult = DialogResult.OK };
-
-                        form.Controls.Add(label);
-                        form.Controls.Add(textBox);
-                        form.Controls.Add(button);
-                        form.AcceptButton = button;
-
-                        if (form.ShowDialog() == DialogResult.OK)
-                        {
-                            apiKey = textBox.Text;
-
-                            // Optionally save to config for future use
-                            try
-                            {
-                                var config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
-                                config.AppSettings.Settings["GoogleApiKey"].Value = apiKey;
-                                config.Save(ConfigurationSaveMode.Modified);
-                                ConfigurationManager.RefreshSection("appSettings");
-                            }
-                            catch { /* Ignore save errors */ }
-                        }
-                    }
-                }
+                InitializeApiKey();
             }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Error,
+                    "Error initializing map providers", true);
+            }
+        }
 
+        public MapService(string apiKey)
+        {
+            // Initialize the httpClient
+            this.httpClient = new System.Net.Http.HttpClient();
+
+            // Set the API key
             this.apiKey = apiKey;
-            this.httpClient = new HttpClient();
 
             // Set timeout for HTTP requests
             this.httpClient.Timeout = TimeSpan.FromSeconds(30);
@@ -87,17 +74,36 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error initializing map providers: {ex.Message}",
-                    "Map Initialization Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                Console.WriteLine($"Error initializing map providers: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Initializes API key for map providers
+        /// </summary>
+        private async void InitializeApiKey()
+        {
+            try
+            {
+                string apiKey = await ApiKeyManager.GetGoogleApiKeyAsync();
+
+                // Set API key for providers
+                GoogleMapProvider.Instance.ApiKey = apiKey;
+                GoogleSatelliteMapProvider.Instance.ApiKey = apiKey;
+                GoogleHybridMapProvider.Instance.ApiKey = apiKey;
+                GoogleTerrainMapProvider.Instance.ApiKey = apiKey;
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning,
+                    "Failed to initialize API key for map providers", true);
             }
         }
 
         /// <summary>
         /// Initializes the Google Maps component with error handling
         /// </summary>
-        public bool InitializeGoogleMaps(GMapControl mapControl, double latitude = 32.0853, double longitude = 34.7818)
+        public bool InitializeGoogleMaps(GMapControl mapControl, double latitude = 32.0853, double longitude = 34.7818, int zoom = 12)
         {
             if (mapControl == null) return false;
 
@@ -108,7 +114,7 @@ namespace claudpro.Services
                 mapControl.Position = new PointLatLng(latitude, longitude);
                 mapControl.MinZoom = 2;
                 mapControl.MaxZoom = 18;
-                mapControl.Zoom = 12;
+                mapControl.Zoom = zoom;
                 mapControl.DragButton = MouseButtons.Left;
                 mapControl.CanDragMap = true;
                 mapControl.ShowCenter = false;
@@ -124,7 +130,8 @@ namespace claudpro.Services
                 catch (Exception ex)
                 {
                     // Just log the error but continue - the map might still work
-                    Console.WriteLine($"Warning initializing GMaps: {ex.Message}");
+                    ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning,
+                        "Warning initializing GMaps", false);
                 }
 
                 // Enable map events
@@ -138,10 +145,8 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error initializing map: {ex.Message}",
-                    "Map Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Error,
+                    "Error initializing map", true);
                 return false;
             }
         }
@@ -169,30 +174,43 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error changing map provider: {ex.Message}",
-                    "Map Provider Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning,
+                    "Error changing map provider", true);
                 return false;
             }
         }
 
         /// <summary>
-        /// Fetches directions from Google Maps Directions API
+        /// Fetches directions from Google Maps Directions API with retries and rate limiting
         /// </summary>
         public async Task<List<PointLatLng>> GetGoogleDirectionsAsync(List<PointLatLng> waypoints, DateTime? targetArrivalTime = null)
         {
             if (waypoints == null || waypoints.Count < 2) return null;
 
+            // Generate cache key
+            string cacheKey = string.Join("|", waypoints.Select(p => $"{p.Lat},{p.Lng}"));
+            if (targetArrivalTime.HasValue)
+            {
+                cacheKey += $"|arrival_{targetArrivalTime.Value.ToString("yyyy-MM-dd HH:mm:ss")}";
+            }
+
+            // Check cache first
+            if (routeCache.ContainsKey(cacheKey))
+                return routeCache[cacheKey];
+
             try
             {
-                string cacheKey = string.Join("|", waypoints.Select(p => $"{p.Lat},{p.Lng}"));
-                if (targetArrivalTime.HasValue)
+                // Get API key
+                string apiKey = await ApiKeyManager.GetGoogleApiKeyAsync();
+                if (string.IsNullOrEmpty(apiKey))
                 {
-                    cacheKey += $"|arrival_{targetArrivalTime.Value.ToString("yyyy-MM-dd HH:mm:ss")}";
+                    ErrorHandler.LogMessage("No Google API key available",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+                    return null;
                 }
 
-                if (routeCache.ContainsKey(cacheKey)) return routeCache[cacheKey];
+                // Apply rate limiting
+                await RateLimitApiRequestAsync();
 
                 var origin = waypoints[0];
                 var destination = waypoints.Last();
@@ -203,68 +221,69 @@ namespace claudpro.Services
                     $"destination={destination.Lat},{destination.Lng}&" +
                     (intermediates.Any() ? $"waypoints={string.Join("|", intermediates.Select(p => $"{p.Lat},{p.Lng}"))}&" : "");
 
-                // הוספת פרמטר זמן הגעה אם סופק
+                // Add target arrival time parameter if provided
                 if (targetArrivalTime.HasValue)
                 {
-                    // וידוא שהתאריך הוא עתידי - אם התאריך קטן מהעכשיו, נשתמש במחר
-                    DateTime futureArrivalTime = targetArrivalTime.Value;
-                    if (futureArrivalTime <= DateTime.Now)
-                    {
-                        // הערה: אנחנו משתמשים בתאריך של מחר עם השעה המקורית
-                        // שעות בפורמט 24 שעות נשמרות נכון
-                        futureArrivalTime = DateTime.Today.AddDays(1) + targetArrivalTime.Value.TimeOfDay;
+                    // Ensure the target time is in the future
+                    DateTime futureArrivalTime = TimeFormatUtility.EnsureFutureDateTime(targetArrivalTime.Value);
 
-                        // בדיקה אם אחרי התיקון עדיין לא בעתיד
-                        if (futureArrivalTime <= DateTime.Now)
-                        {
-                            // אם עדיין בעבר, נוסיף עוד יום
-                            futureArrivalTime = futureArrivalTime.AddDays(1);
-                        }
-                    }
-
-                    // המרת התאריך לפורמט Unix timestamp
-                    var unixTimestamp = (long)((DateTimeOffset)futureArrivalTime).ToUnixTimeSeconds();
+                    // Convert to Unix timestamp
+                    long unixTimestamp = TimeFormatUtility.ToUnixTimestamp(futureArrivalTime);
                     url += $"arrival_time={unixTimestamp}&";
 
-                    Console.WriteLine($"Using future arrival time: {futureArrivalTime.ToString("yyyy-MM-dd HH:mm:ss")} (Unix: {unixTimestamp})");
+                    ErrorHandler.LogMessage(
+                        $"Using future arrival time in directions request: {futureArrivalTime:yyyy-MM-dd HH:mm:ss} (Unix: {unixTimestamp})",
+                        ErrorHandler.ErrorCategory.Mapping,
+                        ErrorHandler.ErrorSeverity.Information);
                 }
 
+                // Add API key
                 url += $"key={apiKey}";
 
-                var response = await httpClient.GetStringAsync(url);
+                // Execute request with retries
+                string response = await ExecuteWithRetriesAsync(async () => await httpClient.GetStringAsync(url));
                 dynamic data = JsonConvert.DeserializeObject(response);
 
-                if (data.status != "OK")
+                if (data.status.ToString() != "OK")
                 {
                     string errorMessage = data.status.ToString();
                     if (data.error_message != null)
                     {
                         errorMessage += $": {data.error_message.ToString()}";
                     }
-                    throw new Exception($"Google Directions API error: {errorMessage}");
+
+                    ErrorHandler.LogMessage($"Google Directions API error: {errorMessage}",
+                        ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning);
+
+                    return null;
                 }
 
+                // Decode polyline points
                 var points = new List<PointLatLng>();
                 foreach (var leg in data.routes[0].legs)
+                {
                     foreach (var step in leg.steps)
+                    {
                         points.AddRange(PolylineEncoder.Decode(step.polyline.points.ToString()));
+                    }
+                }
 
+                // Cache the result
                 routeCache[cacheKey] = points;
+
                 return points;
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error getting directions: {ex.Message}",
-                    "Directions Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                    "Error getting directions from Google API", false);
                 return null;
             }
         }
-        /// Gets route details from the Google Directions API
-        /// </summary>
-        // Update the GetRouteDetailsAsync method in MapService.cs to properly handle time formats
 
+        /// <summary>
+        /// Gets route details from the Google Directions API with improved error handling
+        /// </summary>
         public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng, DateTime? targetArrivalTime = null)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
@@ -272,6 +291,18 @@ namespace claudpro.Services
 
             try
             {
+                // Get API key
+                string apiKey = await ApiKeyManager.GetGoogleApiKeyAsync();
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    ErrorHandler.LogMessage("No Google API key available",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+                    return EstimateRouteDetails(vehicle, destinationLat, destinationLng);
+                }
+
+                // Apply rate limiting
+                await RateLimitApiRequestAsync();
+
                 // Build waypoints
                 string origin = $"{vehicle.StartLatitude},{vehicle.StartLongitude}";
                 string destination = $"{destinationLat},{destinationLng}";
@@ -286,30 +317,23 @@ namespace claudpro.Services
                 if (targetArrivalTime.HasValue)
                 {
                     // Always ensure the target time is in the future
-                    DateTime futureArrivalTime = targetArrivalTime.Value;
-
-                    if (futureArrivalTime <= DateTime.Now)
-                    {
-                        // If today's time has already passed, use tomorrow with the same time of day
-                        futureArrivalTime = DateTime.Today.AddDays(1).Add(targetArrivalTime.Value.TimeOfDay);
-
-                        // Double-check it's still in the future
-                        if (futureArrivalTime <= DateTime.Now)
-                        {
-                            futureArrivalTime = futureArrivalTime.AddDays(1);
-                        }
-                    }
+                    DateTime futureArrivalTime = TimeFormatUtility.EnsureFutureDateTime(targetArrivalTime.Value);
 
                     // Convert to Unix timestamp for Google API
-                    var unixTimestamp = (long)((DateTimeOffset)futureArrivalTime).ToUnixTimeSeconds();
+                    long unixTimestamp = TimeFormatUtility.ToUnixTimestamp(futureArrivalTime);
                     url += $"&arrival_time={unixTimestamp}";
 
-                    Console.WriteLine($"Using future arrival time: {futureArrivalTime.ToString("yyyy-MM-dd HH:mm:ss")} (Unix: {unixTimestamp})");
+                    ErrorHandler.LogMessage(
+                        $"Using future arrival time in route details request: {futureArrivalTime:yyyy-MM-dd HH:mm:ss} (Unix: {unixTimestamp})",
+                        ErrorHandler.ErrorCategory.Mapping,
+                        ErrorHandler.ErrorSeverity.Information);
                 }
 
+                // Add API key
                 url += $"&key={apiKey}";
 
-                var response = await httpClient.GetStringAsync(url);
+                // Execute request with retries
+                string response = await ExecuteWithRetriesAsync(async () => await httpClient.GetStringAsync(url));
                 dynamic data = JsonConvert.DeserializeObject(response);
 
                 if (data.status.ToString() != "OK")
@@ -319,7 +343,12 @@ namespace claudpro.Services
                     {
                         errorMessage += $": {data.error_message.ToString()}";
                     }
-                    throw new Exception($"Google Directions API error: {errorMessage}");
+
+                    ErrorHandler.LogMessage($"Google Directions API error: {errorMessage}",
+                        ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning);
+
+                    // Fall back to estimated route details
+                    return EstimateRouteDetails(vehicle, destinationLat, destinationLng);
                 }
 
                 var routeDetail = new RouteDetails
@@ -351,48 +380,46 @@ namespace claudpro.Services
                         ? vehicle.AssignedPassengers[i].Id
                         : -1;
 
-                    // Process arrival time from API response - ensure consistent 24-hour format
+                    // Process arrival time from API response with consistent formatting
                     string estimatedArrivalTime = null;
                     if (leg.arrival_time != null)
                     {
-                        // First try to parse the time directly from text field
+                        // Try to parse the time from text field first
                         if (!string.IsNullOrEmpty(leg.arrival_time.text.ToString()))
                         {
                             string apiTimeText = leg.arrival_time.text.ToString();
-                            if (DateTime.TryParse(apiTimeText, out DateTime parsedTime))
+                            if (TimeFormatUtility.ParseToDateTime(apiTimeText, out DateTime parsedTime))
                             {
-                                // Store in 24-hour format
-                                estimatedArrivalTime = parsedTime.ToString("HH:mm");
+                                // Store in standard format
+                                estimatedArrivalTime = TimeFormatUtility.FormatTimeStorage(parsedTime);
                             }
                         }
 
-                        // If text parsing failed, try using the value field which is sometimes a timestamp
+                        // If text parsing failed, try using the value field which is a timestamp
                         if (string.IsNullOrEmpty(estimatedArrivalTime) && leg.arrival_time.value != null)
                         {
                             try
                             {
                                 long timestamp = Convert.ToInt64(leg.arrival_time.value.ToString());
-                                var dateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime.ToLocalTime();
-                                estimatedArrivalTime = dateTime.ToString("HH:mm");
+                                var dateTime = TimeFormatUtility.FromUnixTimestamp(timestamp);
+                                estimatedArrivalTime = TimeFormatUtility.FormatTimeStorage(dateTime);
                             }
                             catch { /* Ignore conversion errors */ }
                         }
-
-                        Console.WriteLine($"Stop {i + 1} arrival time from API: {estimatedArrivalTime}");
                     }
 
-                    // Process departure time similarly
+                    // Process departure time similarly with consistent formatting
                     string estimatedDepartureTime = null;
                     if (leg.departure_time != null)
                     {
-                        // First try to parse the time directly from text field
+                        // First try to parse from text field
                         if (!string.IsNullOrEmpty(leg.departure_time.text.ToString()))
                         {
                             string apiTimeText = leg.departure_time.text.ToString();
-                            if (DateTime.TryParse(apiTimeText, out DateTime parsedTime))
+                            if (TimeFormatUtility.ParseToDateTime(apiTimeText, out DateTime parsedTime))
                             {
-                                // Store in 24-hour format
-                                estimatedDepartureTime = parsedTime.ToString("HH:mm");
+                                // Store in standard format
+                                estimatedDepartureTime = TimeFormatUtility.FormatTimeStorage(parsedTime);
                             }
                         }
 
@@ -402,13 +429,11 @@ namespace claudpro.Services
                             try
                             {
                                 long timestamp = Convert.ToInt64(leg.departure_time.value.ToString());
-                                var dateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime.ToLocalTime();
-                                estimatedDepartureTime = dateTime.ToString("HH:mm");
+                                var dateTime = TimeFormatUtility.FromUnixTimestamp(timestamp);
+                                estimatedDepartureTime = TimeFormatUtility.FormatTimeStorage(dateTime);
                             }
                             catch { /* Ignore conversion errors */ }
                         }
-
-                        Console.WriteLine($"Stop {i + 1} departure time from API: {estimatedDepartureTime}");
                     }
 
                     routeDetail.StopDetails.Add(new StopDetail
@@ -434,10 +459,10 @@ namespace claudpro.Services
                     if (!string.IsNullOrEmpty(data.routes[0].legs[0].departure_time.text.ToString()))
                     {
                         string apiTimeText = data.routes[0].legs[0].departure_time.text.ToString();
-                        if (DateTime.TryParse(apiTimeText, out DateTime parsedTime))
+                        if (TimeFormatUtility.ParseToDateTime(apiTimeText, out DateTime parsedTime))
                         {
-                            // Store in 24-hour format
-                            departureTimeText = parsedTime.ToString("HH:mm");
+                            // Store in standard format
+                            departureTimeText = TimeFormatUtility.FormatTimeStorage(parsedTime);
                         }
                     }
 
@@ -447,8 +472,8 @@ namespace claudpro.Services
                         try
                         {
                             long timestamp = Convert.ToInt64(data.routes[0].legs[0].departure_time.value.ToString());
-                            var dateTime = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime.ToLocalTime();
-                            departureTimeText = dateTime.ToString("HH:mm");
+                            var dateTime = TimeFormatUtility.FromUnixTimestamp(timestamp);
+                            departureTimeText = TimeFormatUtility.FormatTimeStorage(dateTime);
                         }
                         catch { /* Ignore conversion errors */ }
                     }
@@ -457,7 +482,11 @@ namespace claudpro.Services
                     {
                         vehicle.DepartureTime = departureTimeText;
                         routeDetail.DepartureTime = departureTimeText;
-                        Console.WriteLine($"Vehicle departure time from API (24-hour format): {departureTimeText}");
+
+                        ErrorHandler.LogMessage(
+                            $"Vehicle departure time from API (standardized format): {departureTimeText}",
+                            ErrorHandler.ErrorCategory.Routing,
+                            ErrorHandler.ErrorSeverity.Information);
                     }
                 }
 
@@ -468,14 +497,17 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error getting route details: {ex.Message}");
-                throw;
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                    "Error getting route details from Google API, using estimated route instead", false);
+
+                // Fall back to estimated route details
+                return EstimateRouteDetails(vehicle, destinationLat, destinationLng);
             }
         }
+
+        /// <summary>
+        /// Estimates route details without using Google API
         /// </summary>
-        /// 
-
-
         public RouteDetails EstimateRouteDetails(Vehicle vehicle, double destinationLat, double destinationLng)
         {
             if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
@@ -548,10 +580,8 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error estimating route details: {ex.Message}",
-                   "Route Estimation Error",
-                   MessageBoxButtons.OK,
-                   MessageBoxIcon.Warning);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Routing, ErrorHandler.ErrorSeverity.Error,
+                    "Error estimating route details", false);
                 return null;
             }
         }
@@ -559,17 +589,17 @@ namespace claudpro.Services
         /// <summary>
         /// Gets a color for a route based on the route index
         /// </summary>
-        public Color GetRouteColor(int index)
+        public System.Drawing.Color GetRouteColor(int index)
         {
-            Color[] routeColors = {
-                Color.FromArgb(255, 128, 0),   // Orange
-                Color.FromArgb(128, 0, 128),   // Purple
-                Color.FromArgb(0, 128, 128),   // Teal
-                Color.FromArgb(128, 0, 0),     // Maroon
-                Color.FromArgb(0, 128, 0),     // Green
-                Color.FromArgb(0, 0, 128),     // Navy
-                Color.FromArgb(128, 128, 0),   // Olive
-                Color.FromArgb(128, 0, 64)     // Burgundy
+            System.Drawing.Color[] routeColors = {
+                System.Drawing.Color.FromArgb(255, 128, 0),   // Orange
+                System.Drawing.Color.FromArgb(128, 0, 128),   // Purple
+                System.Drawing.Color.FromArgb(0, 128, 128),   // Teal
+                System.Drawing.Color.FromArgb(128, 0, 0),     // Maroon
+                System.Drawing.Color.FromArgb(0, 128, 0),     // Green
+                System.Drawing.Color.FromArgb(0, 0, 128),     // Navy
+                System.Drawing.Color.FromArgb(128, 128, 0),   // Olive
+                System.Drawing.Color.FromArgb(128, 0, 64)     // Burgundy
             };
             return routeColors[index % routeColors.Length];
         }
@@ -577,19 +607,30 @@ namespace claudpro.Services
         /// <summary>
         /// Geocodes an address string to latitude and longitude coordinates
         /// </summary>
-        /// <param name="address">The address to geocode</param>
-        /// <returns>A tuple with latitude and longitude if successful, null if failed</returns>
-        public async Task<(double Latitude, double Longitude)?> GeocodeAddressAsync(string address)
+        public async Task<(double Latitude, double Longitude, string FormattedAddress)?> GeocodeAddressAsync(string address)
         {
             if (string.IsNullOrWhiteSpace(address)) return null;
 
             try
             {
+                // Get API key
+                string apiKey = await ApiKeyManager.GetGoogleApiKeyAsync();
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    ErrorHandler.LogMessage("No Google API key available",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+                    return null;
+                }
+
+                // Apply rate limiting
+                await RateLimitApiRequestAsync();
+
                 // URL encode the address
                 string encodedAddress = Uri.EscapeDataString(address);
                 string url = $"https://maps.googleapis.com/maps/api/geocode/json?address={encodedAddress}&key={apiKey}";
 
-                var response = await httpClient.GetStringAsync(url);
+                // Execute request with retries
+                string response = await ExecuteWithRetriesAsync(async () => await httpClient.GetStringAsync(url));
                 dynamic data = JsonConvert.DeserializeObject(response);
 
                 if (data.status.ToString() != "OK" || data.results.Count == 0)
@@ -599,20 +640,23 @@ namespace claudpro.Services
                     {
                         errorMessage += $": {data.error_message.ToString()}";
                     }
-                    throw new Exception($"Geocoding error: {errorMessage}");
+
+                    ErrorHandler.LogMessage($"Geocoding error: {errorMessage}",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+
+                    return null;
                 }
 
                 double lat = Convert.ToDouble(data.results[0].geometry.location.lat);
                 double lng = Convert.ToDouble(data.results[0].geometry.location.lng);
+                string formattedAddress = data.results[0].formatted_address.ToString();
 
-                return (lat, lng);
+                return (lat, lng, formattedAddress);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error geocoding address: {ex.Message}",
-                   "Geocoding Error",
-                   MessageBoxButtons.OK,
-                   MessageBoxIcon.Warning);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                    "Error geocoding address", true);
                 return null;
             }
         }
@@ -620,16 +664,26 @@ namespace claudpro.Services
         /// <summary>
         /// Gets a formatted address from coordinates (reverse geocoding)
         /// </summary>
-        /// <param name="latitude">The latitude</param>
-        /// <param name="longitude">The longitude</param>
-        /// <returns>A formatted address string if successful, null if failed</returns>
         public async Task<string> ReverseGeocodeAsync(double latitude, double longitude)
         {
             try
             {
+                // Get API key// Get API key
+                string apiKey = await ApiKeyManager.GetGoogleApiKeyAsync();
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    ErrorHandler.LogMessage("No Google API key available",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+                    return null;
+                }
+
+                // Apply rate limiting
+                await RateLimitApiRequestAsync();
+
                 string url = $"https://maps.googleapis.com/maps/api/geocode/json?latlng={latitude},{longitude}&key={apiKey}";
 
-                var response = await httpClient.GetStringAsync(url);
+                // Execute request with retries
+                string response = await ExecuteWithRetriesAsync(async () => await httpClient.GetStringAsync(url));
                 dynamic data = JsonConvert.DeserializeObject(response);
 
                 if (data.status.ToString() != "OK" || data.results.Count == 0)
@@ -639,36 +693,52 @@ namespace claudpro.Services
                     {
                         errorMessage += $": {data.error_message.ToString()}";
                     }
-                    throw new Exception($"Reverse geocoding error: {errorMessage}");
+
+                    ErrorHandler.LogMessage($"Reverse geocoding error: {errorMessage}",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+
+                    // Fallback to basic coordinate format
+                    return $"Location ({latitude:F6}, {longitude:F6})";
                 }
 
                 return data.results[0].formatted_address.ToString();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error reverse geocoding: {ex.Message}",
-                   "Reverse Geocoding Error",
-                   MessageBoxButtons.OK,
-                   MessageBoxIcon.Warning);
-                return null;
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                    "Error reverse geocoding", false);
+
+                // Fallback to basic coordinate format
+                return $"Location ({latitude:F6}, {longitude:F6})";
             }
         }
 
         /// <summary>
         /// Searches for address suggestions based on a partial address
         /// </summary>
-        /// <param name="query">The partial address to search for</param>
-        /// <returns>A list of address suggestions</returns>
         public async Task<List<string>> GetAddressSuggestionsAsync(string query)
         {
             if (string.IsNullOrWhiteSpace(query)) return new List<string>();
 
             try
             {
+                // Get API key
+                string apiKey = await ApiKeyManager.GetGoogleApiKeyAsync();
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    ErrorHandler.LogMessage("No Google API key available",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+                    return new List<string>();
+                }
+
+                // Apply rate limiting
+                await RateLimitApiRequestAsync();
+
                 string encodedQuery = Uri.EscapeDataString(query);
                 string url = $"https://maps.googleapis.com/maps/api/place/autocomplete/json?input={encodedQuery}&key={apiKey}";
 
-                var response = await httpClient.GetStringAsync(url);
+                // Execute request with retries
+                string response = await ExecuteWithRetriesAsync(async () => await httpClient.GetStringAsync(url));
                 dynamic data = JsonConvert.DeserializeObject(response);
 
                 if (data.status.ToString() != "OK")
@@ -678,7 +748,11 @@ namespace claudpro.Services
                     {
                         errorMessage += $": {data.error_message.ToString()}";
                     }
-                    throw new Exception($"Autocomplete error: {errorMessage}");
+
+                    ErrorHandler.LogMessage($"Autocomplete error: {errorMessage}",
+                        ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Warning);
+
+                    return new List<string>();
                 }
 
                 var suggestions = new List<string>();
@@ -691,9 +765,76 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error getting address suggestions: {ex.Message}");
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                    "Error getting address suggestions", false);
                 return new List<string>();
             }
+        }
+
+        /// <summary>
+        /// Applies rate limiting to API requests
+        /// </summary>
+        private async Task RateLimitApiRequestAsync()
+        {
+            // Calculate time since last API call
+            TimeSpan sinceLastCall = DateTime.Now - lastApiCall;
+
+            // If we made a call too recently, wait to avoid rate limits
+            if (sinceLastCall.TotalMilliseconds < MinApiCallIntervalMs)
+            {
+                int delayMs = MinApiCallIntervalMs - (int)sinceLastCall.TotalMilliseconds;
+                await Task.Delay(delayMs);
+            }
+
+            // Update the timestamp
+            lastApiCall = DateTime.Now;
+        }
+
+        /// <summary>
+        /// Executes an API request with retries
+        /// </summary>
+        private async Task<string> ExecuteWithRetriesAsync(Func<Task<string>> requestFunc)
+        {
+            int retryCount = 0;
+            TimeSpan retryDelay = TimeSpan.FromSeconds(1);
+
+            while (true)
+            {
+                try
+                {
+                    return await requestFunc();
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+
+                    if (retryCount >= MaxRetries)
+                    {
+                        // Log and rethrow if max retries reached
+                        ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                            $"API request failed after {MaxRetries} retries", false);
+                        throw;
+                    }
+
+                    // Log retry attempt
+                    ErrorHandler.LogMessage($"API request failed, retrying ({retryCount}/{MaxRetries}) after {retryDelay.TotalSeconds}s: {ex.Message}",
+                        ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Information);
+
+                    // Wait before retrying
+                    await Task.Delay(retryDelay);
+
+                    // Exponential backoff
+                    retryDelay = TimeSpan.FromMilliseconds(retryDelay.TotalMilliseconds * 2);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clears the route cache
+        /// </summary>
+        public void ClearCache()
+        {
+            routeCache.Clear();
         }
 
         // IDisposable implementation

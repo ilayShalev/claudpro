@@ -9,7 +9,7 @@ using claudpro.Models;
 
 namespace claudpro.Services
 {
-    public class DatabaseService : IDisposable
+    public partial class DatabaseService : IDisposable
     {
         private readonly string connectionString;
         private SQLiteConnection connection;
@@ -2130,3 +2130,11 @@ namespace claudpro.Services
         #endregion
     }
 }
+
+
+
+
+
+
+
+

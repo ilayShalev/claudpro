@@ -16,29 +16,19 @@ namespace claudpro.Services
 {
     public class RoutingService
     {
-        private  MapService mapService;
-        private  double destinationLat;
-        private  double destinationLng;
+        private MapService mapService;
+        private double destinationLat;
+        private double destinationLng;
         private string destinationTargetTime;
         public Dictionary<int, RouteDetails> VehicleRouteDetails { get; private set; }
 
         public RoutingService(MapService mapService, double destinationLat, double destinationLng, string destinationTargetTime)
         {
-            this.mapService = mapService;
+            this.mapService = mapService ?? throw new ArgumentNullException(nameof(mapService));
             this.destinationLat = destinationLat;
             this.destinationLng = destinationLng;
-
-
-            DateTime? targetDateTime = null;
-
-            if (TimeSpan.TryParse(destinationTargetTime, out TimeSpan targetTime))
-            {
-                targetDateTime = DateTime.Today.AddDays(1).Add(targetTime); // למשל: מחר בשעה 08:00
-            }
-
             this.destinationTargetTime = destinationTargetTime;
             VehicleRouteDetails = new Dictionary<int, RouteDetails>();
-
         }
 
         /// <summary>
@@ -46,37 +36,59 @@ namespace claudpro.Services
         /// </summary>
         public void DisplayDataOnMap(GMapControl mapControl, List<Passenger> passengers, List<Vehicle> vehicles)
         {
-            mapControl.Overlays.Clear();
-
-            var passengersOverlay = new GMapOverlay("passengers");
-            var vehiclesOverlay = new GMapOverlay("vehicles");
-            var destinationOverlay = new GMapOverlay("destination");
-            var routesOverlay = new GMapOverlay("routes");
-
-            // Display destination marker
-            var destinationMarker = MapOverlays.CreateDestinationMarker(destinationLat, destinationLng);
-            destinationOverlay.Markers.Add(destinationMarker);
-
-            // Display passenger markers
-            foreach (var passenger in passengers)
+            try
             {
-                var marker = MapOverlays.CreatePassengerMarker(passenger);
-                passengersOverlay.Markers.Add(marker);
-            }
+                if (mapControl == null) return;
 
-            // Display vehicle markers
-            foreach (var vehicle in vehicles)
+                mapControl.Overlays.Clear();
+
+                var passengersOverlay = new GMapOverlay("passengers");
+                var vehiclesOverlay = new GMapOverlay("vehicles");
+                var destinationOverlay = new GMapOverlay("destination");
+                var routesOverlay = new GMapOverlay("routes");
+
+                // Display destination marker
+                var destinationMarker = MapOverlays.CreateDestinationMarker(destinationLat, destinationLng);
+                destinationOverlay.Markers.Add(destinationMarker);
+
+                // Display passenger markers
+                if (passengers != null)
+                {
+                    foreach (var passenger in passengers)
+                    {
+                        if (passenger != null)
+                        {
+                            var marker = MapOverlays.CreatePassengerMarker(passenger);
+                            passengersOverlay.Markers.Add(marker);
+                        }
+                    }
+                }
+
+                // Display vehicle markers
+                if (vehicles != null)
+                {
+                    foreach (var vehicle in vehicles)
+                    {
+                        if (vehicle != null)
+                        {
+                            var marker = MapOverlays.CreateVehicleMarker(vehicle);
+                            vehiclesOverlay.Markers.Add(marker);
+                        }
+                    }
+                }
+
+                mapControl.Overlays.Add(routesOverlay);
+                mapControl.Overlays.Add(passengersOverlay);
+                mapControl.Overlays.Add(vehiclesOverlay);
+                mapControl.Overlays.Add(destinationOverlay);
+
+                mapControl.Zoom = mapControl.Zoom; // Force refresh
+            }
+            catch (Exception ex)
             {
-                var marker = MapOverlays.CreateVehicleMarker(vehicle);
-                vehiclesOverlay.Markers.Add(marker);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Error,
+                    "Failed to display map data", true);
             }
-
-            mapControl.Overlays.Add(routesOverlay);
-            mapControl.Overlays.Add(passengersOverlay);
-            mapControl.Overlays.Add(vehiclesOverlay);
-            mapControl.Overlays.Add(destinationOverlay);
-
-            mapControl.Zoom = mapControl.Zoom; // Force refresh
         }
 
         /// <summary>
@@ -109,9 +121,9 @@ namespace claudpro.Services
                     if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0) continue;
 
                     var points = new List<PointLatLng>
-            {
-                new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
-            };
+                    {
+                        new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
+                    };
 
                     // Add passenger pickup points
                     foreach (var passenger in vehicle.AssignedPassengers)
@@ -135,231 +147,498 @@ namespace claudpro.Services
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error displaying solution on map: {ex.Message}",
-                    "Map Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Mapping, ErrorHandler.ErrorSeverity.Error,
+                    "Failed to display solution on map", true);
             }
         }
+
         /// <summary>
         /// Gets detailed route information using Google Maps Directions API
         /// </summary>
-        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime? destinationTargetTime)
+        public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution, DateTime? targetArrivalTime)
         {
             if (solution == null) return;
 
-            // Initialize overlays only if mapControl is provided
-            GMapOverlay routesOverlay = null;
-            if (mapControl != null)
+            try
             {
-                routesOverlay = mapControl.Overlays.FirstOrDefault(o => o.Id == "routes");
-                if (routesOverlay == null)
+                // Initialize overlays only if mapControl is provided
+                GMapOverlay routesOverlay = null;
+                if (mapControl != null)
                 {
-                    routesOverlay = new GMapOverlay("routes");
-                    mapControl.Overlays.Add(routesOverlay);
-                }
-                else
-                {
-                    routesOverlay.Routes.Clear();
-                }
-            }
-
-            VehicleRouteDetails.Clear();
-            var colors = mapControl != null ? MapOverlays.GetRouteColors() : null;
-
-            // Log the target arrival time for debugging
-            if (destinationTargetTime.HasValue)
-            {
-                Console.WriteLine($"Target arrival time for route calculation: {destinationTargetTime.Value.ToString("yyyy-MM-dd HH:mm:ss")}");
-            }
-
-            for (int i = 0; i < solution.Vehicles.Count; i++)
-            {
-                var vehicle = solution.Vehicles[i];
-                if (vehicle.AssignedPassengers.Count == 0) continue;
-
-                // Get route details from Google API, passing the target arrival time
-                var routeDetails = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, destinationTargetTime);
-                if (routeDetails != null)
-                {
-                    VehicleRouteDetails[vehicle.Id] = routeDetails;
-                    vehicle.TotalDistance = routeDetails.TotalDistance;
-                    vehicle.TotalTime = routeDetails.TotalTime;
-
-                    // Update vehicle departure time from API response
-                    if (!string.IsNullOrEmpty(routeDetails.DepartureTime))
+                    routesOverlay = mapControl.Overlays.FirstOrDefault(o => o.Id == "routes");
+                    if (routesOverlay == null)
                     {
-                        vehicle.DepartureTime = routeDetails.DepartureTime;
-                        Console.WriteLine($"Updated vehicle {vehicle.Id} departure time to: {vehicle.DepartureTime} (24-hour format)");
+                        routesOverlay = new GMapOverlay("routes");
+                        mapControl.Overlays.Add(routesOverlay);
                     }
-                    else if (destinationTargetTime.HasValue && vehicle.AssignedPassengers.Count > 0)
+                    else
                     {
-                        // If API didn't provide departure time but we have a target arrival time,
-                        // calculate departure time based on total travel time
-                        DateTime estimatedDeparture = destinationTargetTime.Value.AddMinutes(-routeDetails.TotalTime);
-                        vehicle.DepartureTime = estimatedDeparture.ToString("HH:mm");
-                        Console.WriteLine($"Calculated vehicle {vehicle.Id} departure time: {vehicle.DepartureTime} (based on arrival time)");
+                        routesOverlay.Routes.Clear();
+                    }
+                }
+
+                VehicleRouteDetails.Clear();
+                var colors = mapControl != null ? MapOverlays.GetRouteColors() : null;
+
+                // Ensure targetArrivalTime is in the future
+                if (targetArrivalTime.HasValue)
+                {
+                    targetArrivalTime = TimeFormatUtility.EnsureFutureDateTime(targetArrivalTime.Value);
+
+                    // Log for debugging
+                    ErrorHandler.LogMessage(
+                        $"Target arrival time for route calculation: {targetArrivalTime.Value:yyyy-MM-dd HH:mm:ss}",
+                        ErrorHandler.ErrorCategory.Routing,
+                        ErrorHandler.ErrorSeverity.Information);
+                }
+                else if (!string.IsNullOrEmpty(destinationTargetTime) && TimeFormatUtility.ParseToDateTime(destinationTargetTime, out DateTime parsedTime))
+                {
+                    // Use destination target time if no specific time provided
+                    DateTime baseDate = DateTime.Today;
+
+                    // Use tomorrow if the time has already passed today
+                    if (baseDate.Add(parsedTime.TimeOfDay) < DateTime.Now)
+                    {
+                        baseDate = baseDate.AddDays(1);
                     }
 
-                    // Update pickup times for passengers
-                    for (int j = 0; j < vehicle.AssignedPassengers.Count; j++)
+                    targetArrivalTime = baseDate.Add(parsedTime.TimeOfDay);
+
+                    // Log for debugging
+                    ErrorHandler.LogMessage(
+                        $"Using destination target time: {targetArrivalTime.Value:yyyy-MM-dd HH:mm:ss}",
+                        ErrorHandler.ErrorCategory.Routing,
+                        ErrorHandler.ErrorSeverity.Information);
+                }
+
+                for (int i = 0; i < solution.Vehicles.Count; i++)
+                {
+                    var vehicle = solution.Vehicles[i];
+                    if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0) continue;
+
+                    // Get route details from Google API, passing the target arrival time
+                    RouteDetails routeDetails = null;
+
+                    try
                     {
-                        if (j < routeDetails.StopDetails.Count)
+                        routeDetails = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, targetArrivalTime);
+                    }
+                    catch (Exception ex)
+                    {
+                        ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                            "Google API route request failed, using estimated route instead.", false);
+
+                        // Fall back to estimated routes
+                        routeDetails = mapService.EstimateRouteDetails(vehicle, destinationLat, destinationLng);
+                    }
+
+                    if (routeDetails != null)
+                    {
+                        VehicleRouteDetails[vehicle.Id] = routeDetails;
+                        vehicle.TotalDistance = routeDetails.TotalDistance;
+                        vehicle.TotalTime = routeDetails.TotalTime;
+
+                        // Update vehicle departure time from API response
+                        if (!string.IsNullOrEmpty(routeDetails.DepartureTime))
                         {
-                            var stopDetail = routeDetails.StopDetails[j];
-                            var passenger = vehicle.AssignedPassengers[j];
-
-                            // Ensure the matching is correct (StopDetails order might not match AssignedPassengers order)
-                            if (stopDetail.PassengerId == passenger.Id && !string.IsNullOrEmpty(stopDetail.EstimatedArrivalTime))
+                            // Normalize to standard format
+                            string normalizedDepartureTime = TimeFormatUtility.NormalizeTimeString(routeDetails.DepartureTime);
+                            if (!string.IsNullOrEmpty(normalizedDepartureTime))
                             {
-                                passenger.EstimatedPickupTime = stopDetail.EstimatedArrivalTime;
-                                Console.WriteLine($"Updated passenger {passenger.Id} pickup time to: {passenger.EstimatedPickupTime}");
-                            }
-                            else if (string.IsNullOrEmpty(passenger.EstimatedPickupTime) && !string.IsNullOrEmpty(vehicle.DepartureTime))
-                            {
-                                // If no arrival time from API, estimate based on cumulative time
-                                double cumulativeMinutes = stopDetail.CumulativeTime;
+                                vehicle.DepartureTime = normalizedDepartureTime;
 
-                                if (DateTime.TryParse(vehicle.DepartureTime, out DateTime depTime))
-                                {
-                                    DateTime estPickupTime = depTime.AddMinutes(cumulativeMinutes);
-                                    passenger.EstimatedPickupTime = estPickupTime.ToString("HH:mm");
-                                    Console.WriteLine($"Calculated passenger {passenger.Id} pickup time: {passenger.EstimatedPickupTime} (based on departure + cumulative time)");
-                                }
+                                ErrorHandler.LogMessage(
+                                    $"Updated vehicle {vehicle.Id} departure time to: {vehicle.DepartureTime}",
+                                    ErrorHandler.ErrorCategory.Routing,
+                                    ErrorHandler.ErrorSeverity.Information);
                             }
+                        }
+                        else if (targetArrivalTime.HasValue && vehicle.AssignedPassengers.Count > 0)
+                        {
+                            // If API didn't provide departure time but we have a target arrival time,
+                            // calculate departure time based on total travel time
+                            DateTime estimatedDeparture = targetArrivalTime.Value.AddMinutes(-routeDetails.TotalTime);
+                            vehicle.DepartureTime = TimeFormatUtility.FormatTimeStorage(estimatedDeparture);
+
+                            ErrorHandler.LogMessage(
+                                $"Calculated vehicle {vehicle.Id} departure time: {vehicle.DepartureTime} (based on arrival time)",
+                                ErrorHandler.ErrorCategory.Routing,
+                                ErrorHandler.ErrorSeverity.Information);
+                        }
+
+                        // Update pickup times for passengers
+                        UpdatePassengerPickupTimes(vehicle, routeDetails, targetArrivalTime);
+                    }
+
+                    // Skip route visualization if no map control provided (headless mode)
+                    if (mapControl == null) continue;
+
+                    // Create route points
+                    var points = new List<PointLatLng>
+                    {
+                        new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
+                    };
+
+                    foreach (var passenger in vehicle.AssignedPassengers)
+                    {
+                        if (passenger != null)
+                        {
+                            points.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
+                        }
+                    }
+
+                    points.Add(new PointLatLng(destinationLat, destinationLng));
+
+                    // Get directions from Google Maps
+                    List<PointLatLng> routePoints = null;
+                    try
+                    {
+                        routePoints = await mapService.GetGoogleDirectionsAsync(points, targetArrivalTime);
+                    }
+                    catch (Exception ex)
+                    {
+                        ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                            "Failed to get Google direction points, using straight lines instead.", false);
+                    }
+
+                    if (routePoints != null && routePoints.Count > 0)
+                    {
+                        points = routePoints;
+                    }
+
+                    // Add route to map
+                    var routeColor = colors[i % colors.Length];
+                    var route = MapOverlays.CreateRoute(points, $"Route {i}", routeColor);
+                    routesOverlay.Routes.Add(route);
+                }
+
+                // Refresh map if present
+                if (mapControl != null)
+                {
+                    mapControl.Zoom = mapControl.Zoom; // Force refresh
+                }
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Routing, ErrorHandler.ErrorSeverity.Error,
+                    "Failed to get Google routes", true);
+
+                // Fallback to calculated routes
+                CalculateEstimatedRouteDetails(solution);
+            }
+        }
+
+        /// <summary>
+        /// Updates passenger pickup times based on route details and departure time
+        /// </summary>
+        private void UpdatePassengerPickupTimes(Vehicle vehicle, RouteDetails routeDetails, DateTime? targetArrivalTime)
+        {
+            if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0 || routeDetails == null)
+                return;
+
+            try
+            {
+                // First check if the route details already have pickup times from the API
+                bool hasApiTimes = false;
+
+                for (int i = 0; i < Math.Min(vehicle.AssignedPassengers.Count, routeDetails.StopDetails.Count); i++)
+                {
+                    var stopDetail = routeDetails.StopDetails[i];
+                    var passenger = vehicle.AssignedPassengers[i];
+
+                    // Check if passenger and stop ids match and there's an arrival time
+                    if (stopDetail.PassengerId == passenger.Id && !string.IsNullOrEmpty(stopDetail.EstimatedArrivalTime))
+                    {
+                        string normalizedPickupTime = TimeFormatUtility.NormalizeTimeString(stopDetail.EstimatedArrivalTime);
+                        if (!string.IsNullOrEmpty(normalizedPickupTime))
+                        {
+                            passenger.EstimatedPickupTime = normalizedPickupTime;
+                            hasApiTimes = true;
+
+                            ErrorHandler.LogMessage(
+                                $"Set passenger {passenger.Id} pickup time from API: {normalizedPickupTime}",
+                                ErrorHandler.ErrorCategory.Routing,
+                                ErrorHandler.ErrorSeverity.Information);
                         }
                     }
                 }
 
-                // Skip route visualization if no map control provided (headless mode)
-                if (mapControl == null) continue;
-
-                // Create route points
-                var points = new List<PointLatLng>
-        {
-            new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
-        };
-
-                foreach (var passenger in vehicle.AssignedPassengers)
+                // If no API times, calculate based on vehicle departure time or target arrival time
+                if (!hasApiTimes)
                 {
-                    points.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
+                    if (!string.IsNullOrEmpty(vehicle.DepartureTime) &&
+                        TimeFormatUtility.ParseToDateTime(vehicle.DepartureTime, out DateTime departureTime))
+                    {
+                        // Calculate forward from departure time
+                        CalculatePickupTimesFromDeparture(vehicle, routeDetails, departureTime);
+                    }
+                    else if (targetArrivalTime.HasValue)
+                    {
+                        // Calculate backward from arrival time
+                        CalculatePickupTimesFromArrival(vehicle, routeDetails, targetArrivalTime.Value);
+                    }
                 }
-
-                points.Add(new PointLatLng(destinationLat, destinationLng));
-
-                // Get directions from Google Maps - pass the target arrival time to get traffic-based directions
-                var routePoints = await mapService.GetGoogleDirectionsAsync(points, destinationTargetTime);
-
-                if (routePoints != null && routePoints.Count > 0)
-                {
-                    points = routePoints;
-                }
-
-                // Add route to map
-                var routeColor = colors[i % colors.Length];
-                var route = MapOverlays.CreateRoute(points, $"Route {i}", routeColor);
-                routesOverlay.Routes.Add(route);
             }
-
-            // Refresh map if present
-            if (mapControl != null)
+            catch (Exception ex)
             {
-                mapControl.Zoom = mapControl.Zoom; // Force refresh
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Routing, ErrorHandler.ErrorSeverity.Warning,
+                    "Failed to update passenger pickup times", false);
             }
         }
 
+        /// <summary>
+        /// Calculates pickup times based on vehicle departure time
+        /// </summary>
+        private void CalculatePickupTimesFromDeparture(Vehicle vehicle, RouteDetails routeDetails, DateTime departureTime)
+        {
+            for (int i = 0; i < Math.Min(vehicle.AssignedPassengers.Count, routeDetails.StopDetails.Count); i++)
+            {
+                var stopDetail = routeDetails.StopDetails[i];
+                var passenger = vehicle.AssignedPassengers[i];
+
+                // Ensure we have the correct passenger
+                if (stopDetail.PassengerId == passenger.Id)
+                {
+                    // Calculate pickup time based on cumulative time from start
+                    double cumulativeMinutes = stopDetail.CumulativeTime;
+                    DateTime pickupTime = departureTime.AddMinutes(cumulativeMinutes);
+
+                    // Format as HH:mm
+                    passenger.EstimatedPickupTime = TimeFormatUtility.FormatTimeStorage(pickupTime);
+
+                    ErrorHandler.LogMessage(
+                        $"Calculated passenger {passenger.Id} pickup time from departure: {passenger.EstimatedPickupTime}",
+                        ErrorHandler.ErrorCategory.Routing,
+                        ErrorHandler.ErrorSeverity.Information);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Calculates pickup times based on target arrival time, working backward
+        /// </summary>
+        private void CalculatePickupTimesFromArrival(Vehicle vehicle, RouteDetails routeDetails, DateTime arrivalTime)
+        {
+            if (routeDetails.StopDetails.Count == 0) return;
+
+            // Calculate departure time based on total route time
+            DateTime departureTime = arrivalTime.AddMinutes(-routeDetails.TotalTime);
+
+            // Store departure time on vehicle
+            vehicle.DepartureTime = TimeFormatUtility.FormatTimeStorage(departureTime);
+
+            // Now calculate pickup times forward from departure time
+            CalculatePickupTimesFromDeparture(vehicle, routeDetails, departureTime);
+        }
+
+        /// <summary>
         /// Calculates estimated route details for a solution without using Google API
         /// </summary>
         public void CalculateEstimatedRouteDetails(Solution solution)
         {
             if (solution == null) return;
 
-            VehicleRouteDetails.Clear();
-
-            foreach (var vehicle in solution.Vehicles)
+            try
             {
-                if (vehicle.AssignedPassengers.Count == 0) continue;
+                VehicleRouteDetails.Clear();
 
-                var routeDetails = mapService.EstimateRouteDetails(vehicle, destinationLat, destinationLng);
-                if (routeDetails != null)
+                foreach (var vehicle in solution.Vehicles)
                 {
-                    VehicleRouteDetails[vehicle.Id] = routeDetails;
-                    vehicle.TotalDistance = routeDetails.TotalDistance;
-                    vehicle.TotalTime = routeDetails.TotalTime;
+                    if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                        continue;
+
+                    var routeDetails = mapService.EstimateRouteDetails(vehicle, destinationLat, destinationLng);
+                    if (routeDetails != null)
+                    {
+                        VehicleRouteDetails[vehicle.Id] = routeDetails;
+                        vehicle.TotalDistance = routeDetails.TotalDistance;
+                        vehicle.TotalTime = routeDetails.TotalTime;
+
+                        // If we have a target arrival time, calculate departure and pickup times
+                        if (!string.IsNullOrEmpty(destinationTargetTime) &&
+                            TimeFormatUtility.ParseToDateTime(destinationTargetTime, out DateTime targetTime))
+                        {
+                            // Use tomorrow for calculations
+                            DateTime baseDate = DateTime.Today.AddDays(1);
+                            DateTime targetDateTime = baseDate.Add(targetTime.TimeOfDay);
+
+                            CalculatePickupTimesFromArrival(vehicle, routeDetails, targetDateTime);
+                        }
+                    }
                 }
+
+                ErrorHandler.LogMessage(
+                    $"Estimated route details for {VehicleRouteDetails.Count} vehicles",
+                    ErrorHandler.ErrorCategory.Routing,
+                    ErrorHandler.ErrorSeverity.Information);
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Routing, ErrorHandler.ErrorSeverity.Error,
+                    "Failed to calculate estimated route details", true);
             }
         }
 
-
+        /// <summary>
+        /// Updates route details with API data
+        /// </summary>
         public async Task CalculateRouteDetailsFromApiAsync(Solution solution)
         {
-            foreach (var vehicle in solution.Vehicles)
-            {
-                DateTime? departure = DateTime.TryParse(vehicle.DepartureTime, out var dt) ? dt : (DateTime?)null;
+            if (solution == null) return;
 
-                var details = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, departure);
-                VehicleRouteDetails[vehicle.Id] = details;
+            try
+            {
+                foreach (var vehicle in solution.Vehicles)
+                {
+                    if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                        continue;
+
+                    // Parse departure time if available
+                    DateTime? departure = null;
+                    if (!string.IsNullOrEmpty(vehicle.DepartureTime) &&
+                        TimeFormatUtility.ParseToDateTime(vehicle.DepartureTime, out DateTime parsedTime))
+                    {
+                        departure = DateTime.Today.Add(parsedTime.TimeOfDay);
+
+                        // If it's in the past, use tomorrow
+                        if (departure.Value < DateTime.Now)
+                        {
+                            departure = departure.Value.AddDays(1);
+                        }
+                    }
+
+                    try
+                    {
+                        var details = await mapService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, departure);
+                        if (details != null)
+                        {
+                            VehicleRouteDetails[vehicle.Id] = details;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Network, ErrorHandler.ErrorSeverity.Warning,
+                            $"Failed to get route details for vehicle {vehicle.Id}, using fallback", false);
+
+                        // Use estimated route as fallback// Use estimated route as fallback
+                        var estimatedDetails = mapService.EstimateRouteDetails(vehicle, destinationLat, destinationLng);
+                        if (estimatedDetails != null)
+                        {
+                            VehicleRouteDetails[vehicle.Id] = estimatedDetails;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Routing, ErrorHandler.ErrorSeverity.Error,
+                    "Failed to calculate route details from API", true);
             }
         }
-
 
         /// <summary>
         /// Validates the solution for constraints like capacity and passenger assignment
         /// </summary>
         public string ValidateSolution(Solution solution, List<Passenger> allPassengers)
         {
-            if (solution == null) return "No solution to validate.";
+            if (solution == null)
+                return "No solution to validate.";
 
-            var assignedPassengers = new HashSet<int>();
-            var capacityExceeded = false;
-            var passengersWithMultipleAssignments = new List<int>();
+            if (allPassengers == null)
+                return "No passengers to validate against.";
 
-            foreach (var vehicle in solution.Vehicles)
+            try
             {
-                if (vehicle.AssignedPassengers.Count > vehicle.Capacity)
+                var assignedPassengers = new HashSet<int>();
+                var capacityExceeded = false;
+                var passengersWithMultipleAssignments = new List<int>();
+
+                foreach (var vehicle in solution.Vehicles)
                 {
-                    capacityExceeded = true;
+                    if (vehicle == null) continue;
+
+                    if (vehicle.AssignedPassengers != null && vehicle.AssignedPassengers.Count > vehicle.Capacity)
+                    {
+                        capacityExceeded = true;
+                    }
+
+                    if (vehicle.AssignedPassengers != null)
+                    {
+                        foreach (var passenger in vehicle.AssignedPassengers)
+                        {
+                            if (passenger == null) continue;
+
+                            if (assignedPassengers.Contains(passenger.Id))
+                            {
+                                passengersWithMultipleAssignments.Add(passenger.Id);
+                            }
+                            else
+                            {
+                                assignedPassengers.Add(passenger.Id);
+                            }
+                        }
+                    }
                 }
 
-                foreach (var passenger in vehicle.AssignedPassengers)
+                // Check that all passengers who need a ride are assigned
+                var availablePassengerIds = allPassengers
+                    .Where(p => p.IsAvailableTomorrow)
+                    .Select(p => p.Id)
+                    .ToHashSet();
+
+                bool allAssigned = availablePassengerIds.IsSubsetOf(assignedPassengers);
+                int unassignedCount = availablePassengerIds.Count -
+                    availablePassengerIds.Intersect(assignedPassengers).Count();
+
+                // Calculate statistics
+                double totalDistance = solution.Vehicles
+                    .Where(v => v != null)
+                    .Sum(v => v.TotalDistance);
+
+                double totalTime = solution.Vehicles
+                    .Where(v => v != null)
+                    .Sum(v => v.TotalTime);
+
+                double averageTime = solution.Vehicles.Count(v => v != null && v.AssignedPassengers != null && v.AssignedPassengers.Count > 0) > 0
+                    ? totalTime / solution.Vehicles.Count(v => v != null && v.AssignedPassengers != null && v.AssignedPassengers.Count > 0)
+                    : 0;
+
+                int usedVehicles = solution.Vehicles.Count(v => v != null && v.AssignedPassengers != null && v.AssignedPassengers.Count > 0);
+
+                StringBuilder report = new StringBuilder();
+                report.AppendLine("Validation Results:");
+                report.AppendLine($"All passengers assigned: {allAssigned}");
+                report.AppendLine($"Assigned passengers: {assignedPassengers.Count}/{availablePassengerIds.Count}");
+
+                if (unassignedCount > 0)
                 {
-                    if (assignedPassengers.Contains(passenger.Id))
-                    {
-                        passengersWithMultipleAssignments.Add(passenger.Id);
-                    }
-                    else
-                    {
-                        assignedPassengers.Add(passenger.Id);
-                    }
+                    report.AppendLine($"Unassigned passengers: {unassignedCount}");
                 }
+
+                report.AppendLine($"Capacity exceeded: {capacityExceeded}");
+
+                if (passengersWithMultipleAssignments.Count > 0)
+                {
+                    report.AppendLine($"Passengers with multiple assignments: {passengersWithMultipleAssignments.Count}");
+                    report.AppendLine($"IDs: {string.Join(", ", passengersWithMultipleAssignments)}");
+                }
+
+                report.AppendLine();
+                report.AppendLine("Statistics:");
+                report.AppendLine($"Total distance: {totalDistance:F2} km");
+                report.AppendLine($"Total time: {totalTime:F2} minutes");
+                report.AppendLine($"Average time per vehicle: {averageTime:F2} minutes");
+                report.AppendLine($"Used vehicles: {usedVehicles}/{solution.Vehicles.Count(v => v != null)}");
+
+                return report.ToString();
             }
-
-            bool allAssigned = assignedPassengers.Count == allPassengers.Count;
-
-            // Calculate statistics
-            double totalDistance = solution.Vehicles.Sum(v => v.TotalDistance);
-            double totalTime = solution.Vehicles.Sum(v => v.TotalTime);
-            double averageTime = totalTime / solution.Vehicles.Count(v => v.AssignedPassengers.Count > 0);
-            int usedVehicles = solution.Vehicles.Count(v => v.AssignedPassengers.Count > 0);
-
-            StringBuilder report = new StringBuilder();
-            report.AppendLine("Validation Results:");
-            report.AppendLine($"All passengers assigned: {allAssigned}");
-            report.AppendLine($"Assigned passengers: {assignedPassengers.Count}/{allPassengers.Count}");
-            report.AppendLine($"Capacity exceeded: {capacityExceeded}");
-
-            if (passengersWithMultipleAssignments.Count > 0)
+            catch (Exception ex)
             {
-                report.AppendLine($"Passengers with multiple assignments: {passengersWithMultipleAssignments.Count}");
-                report.AppendLine($"IDs: {string.Join(", ", passengersWithMultipleAssignments)}");
+                ErrorHandler.LogError(ex, ErrorHandler.ErrorCategory.Routing, ErrorHandler.ErrorSeverity.Error,
+                    "Failed to validate solution", false);
+
+                return $"Error validating solution: {ex.Message}";
             }
-
-            report.AppendLine();
-            report.AppendLine("Statistics:");
-            report.AppendLine($"Total distance: {totalDistance:F2} km");
-            report.AppendLine($"Total time: {totalTime:F2} minutes");
-            report.AppendLine($"Average time per vehicle: {averageTime:F2} minutes");
-            report.AppendLine($"Used vehicles: {usedVehicles}/{solution.Vehicles.Count}");
-
-            return report.ToString();
         }
     }
 }
